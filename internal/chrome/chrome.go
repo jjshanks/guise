@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -75,6 +76,20 @@ func profileRank(dir string) int {
 		}
 	}
 	return 1 << 30 // Unknown names sort last.
+}
+
+// validProfileDir matches Chrome's on-disk profile directory names — "Default",
+// "Profile 1", "Guest Profile", etc.: letters, digits, spaces, underscores, and
+// hyphens only. Chrome never creates anything outside this set.
+var validProfileDir = regexp.MustCompile(`^[A-Za-z0-9 _-]+$`)
+
+// ValidProfileDir reports whether dir is a syntactically valid profile
+// directory name. The router checks this before passing the value to
+// chrome.exe, so a tampered config (§5.2) cannot push odd bytes into the
+// command line even when Local State is unreadable and ProfileExists can't
+// vet it against the real list.
+func ValidProfileDir(dir string) bool {
+	return validProfileDir.MatchString(dir)
 }
 
 // ProfileExists reports whether dir is a known Chrome profile directory. If

@@ -32,8 +32,18 @@ func Error(title, message string) { box(title, message, mbIconError) }
 func Info(title, message string) { box(title, message, mbIconInfo) }
 
 func box(title, message string, icon uintptr) {
-	t, _ := syscall.UTF16PtrFromString(title)
-	m, _ := syscall.UTF16PtrFromString(message)
+	// UTF16PtrFromString fails only if the string contains a NUL byte. If it
+	// does, skip the box rather than hand MessageBoxW a null pointer — there is
+	// nothing else this path can usefully do, and a crash here would defeat the
+	// purpose of surfacing the original error.
+	t, err := syscall.UTF16PtrFromString(title)
+	if err != nil {
+		return
+	}
+	m, err := syscall.UTF16PtrFromString(message)
+	if err != nil {
+		return
+	}
 	procMessageBox.Call(
 		0,
 		uintptr(unsafe.Pointer(m)),

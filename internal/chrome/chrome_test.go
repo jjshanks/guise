@@ -40,6 +40,28 @@ func TestProfilesParsesAndOrders(t *testing.T) {
 	}
 }
 
+func TestValidProfileDir(t *testing.T) {
+	tests := []struct {
+		dir  string
+		want bool
+	}{
+		{"Default", true},
+		{"Profile 1", true},
+		{"Guest Profile", true},
+		{"My-Profile_2", true},
+		{"", false},
+		{`Profile 3" --user-data-dir=C:\evil`, false},
+		{"Profile\n1", false},
+		{"a/b", false},
+		{"a\\b", false},
+	}
+	for _, tt := range tests {
+		if got := ValidProfileDir(tt.dir); got != tt.want {
+			t.Errorf("ValidProfileDir(%q) = %v, want %v", tt.dir, got, tt.want)
+		}
+	}
+}
+
 func TestResolvePathConfiguredExisting(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "chrome.exe")
 	if err := os.WriteFile(f, []byte("x"), 0o644); err != nil {

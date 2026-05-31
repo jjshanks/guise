@@ -329,6 +329,7 @@ func (w *window) onMove(delta int) {
 // and selects the matching row (§6.2). Writes pending edits back first so the
 // test reflects exactly what is on screen.
 func (w *window) onTest() {
+	w.writeBack() // Flush the detail pane so the test sees what's on screen.
 	url := w.testEd.Text()
 	if url == "" {
 		w.testResult.SetText("type a URL to see which rule wins")

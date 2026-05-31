@@ -91,11 +91,17 @@ func onReady(exe string) {
 		}
 	}
 	refreshDefault()
+	done := make(chan struct{}) // closed on Quit to stop the poll goroutine.
 	go func() {
 		t := time.NewTicker(4 * time.Second)
 		defer t.Stop()
-		for range t.C {
-			refreshDefault()
+		for {
+			select {
+			case <-t.C:
+				refreshDefault()
+			case <-done:
+				return
+			}
 		}
 	}()
 
@@ -137,6 +143,7 @@ func onReady(exe string) {
 					mAutostart.Uncheck()
 				}
 			case <-mQuit.ClickedCh:
+				close(done)
 				systray.Quit()
 				return
 			}

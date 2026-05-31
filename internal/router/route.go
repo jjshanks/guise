@@ -34,9 +34,12 @@ func Route(url string) error {
 		log.Printf("no rule matched %q -> Chrome default", url)
 	}
 
-	// A profile that no longer exists falls back to Chrome's default (§10).
-	if profileDir != "" && !chrome.ProfileExists(profileDir) {
-		log.Printf("profile %q no longer exists -> Chrome default", profileDir)
+	// A profile must be syntactically valid and still exist; otherwise fall back
+	// to Chrome's default (§10). The syntax check guards against a tampered
+	// config injecting odd values into chrome.exe's command line even when Local
+	// State is unreadable and ProfileExists cannot vet the name.
+	if profileDir != "" && (!chrome.ValidProfileDir(profileDir) || !chrome.ProfileExists(profileDir)) {
+		log.Printf("profile %q invalid or missing -> Chrome default", profileDir)
 		profileDir = ""
 	}
 
