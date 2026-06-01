@@ -127,6 +127,52 @@ func onReady(exe string) {
 	)
 	exeDir := filepath.Dir(exe)
 
+	// done is closed on shutdown to stop the poll goroutines. quit guards the
+	// shutdown so the install path (which may fire from a background goroutine)
+	// and the Quit menu item can't close done twice.
+	done := make(chan struct{})
+	var quitOnce sync.Once
+	quit := func() {
+		quitOnce.Do(func() {
+			close(done)
+			systray.Quit()
+		})
+	}
+
+	// installPending applies the downloaded update and relaunches, replacing this
+	// instance (§14.3). It no-ops if nothing is pending and notifies on failure;
+	// on success it shuts this tray down (via quit) so only the new one remains.
+	// Callers do their own confirm first — this performs the swap unconditionally.
+	// It returns true only when the swap succeeded and shutdown is underway, so a
+	// caller running on the event loop can stop the loop without killing the tray
+	// on a failed apply.
+	installPending := func() bool {
+		// Claim the pending update so a concurrent caller (the post-download
+		// prompt and the tray item can both reach here) doesn't apply it twice.
+		updateMu.Lock()
+		path, ver := pendingPath, pendingVer
+		pendingPath, pendingVer = "", ""
+		updateMu.Unlock()
+		if path == "" {
+			return false // Nothing downloaded yet, or already claimed.
+		}
+		if err := updater.Apply(exe, path); err != nil {
+			log.Printf("apply update %s: %v", ver, err)
+			notify.Error("Guise", "Could not install the update:\n"+err.Error())
+			// Restore so the tray item can retry the claimed update.
+			updateMu.Lock()
+			if pendingPath == "" {
+				pendingPath, pendingVer = path, ver
+			}
+			updateMu.Unlock()
+			return false
+		}
+		// The replacement is already starting; shut this instance down.
+		log.Printf("applied update %s; relaunching and quitting", ver)
+		quit()
+		return true
+	}
+
 	// checkForUpdate runs the full check → download → verify flow (§14). It is
 	// always safe to call: every failure is logged and, when manual, surfaced to
 	// the user, but the tray keeps running. manual=false is the background path,
@@ -186,7 +232,12 @@ func onReady(exe string) {
 		mInstall.SetTitle("Install update " + rel.TagName)
 		mInstall.Show()
 		log.Printf("update %s downloaded and verified at %s", rel.TagName, path)
-		notify.Info("Guise", "Guise "+rel.TagName+" has been downloaded and verified.\n\nChoose \"Install update "+rel.TagName+"\" in the tray menu to apply it and restart.")
+		// Offer to install straight from this prompt. Yes applies and restarts
+		// now; No defers — the "Install update" tray item stays available so the
+		// user can apply it whenever they like (§14.2).
+		if notify.Confirm("Guise", "Guise "+rel.TagName+" has been downloaded and verified.\n\nInstall it now? Guise will close and reopen.\n\nChoose No to keep using this version — you can install later from the tray menu.") {
+			installPending()
+		}
 	}
 
 	// Live default-browser indicator (§6.1): poll so it reflects changes the
@@ -205,7 +256,6 @@ func onReady(exe string) {
 		}
 	}
 	refreshDefault()
-	done := make(chan struct{}) // closed on Quit to stop the poll goroutines.
 	go func() {
 		t := time.NewTicker(4 * time.Second)
 		defer t.Stop()
@@ -271,17 +321,9 @@ func onReady(exe string) {
 				if !notify.Confirm("Guise", "Install update "+ver+" now?\n\nGuise will close and reopen.") {
 					continue
 				}
-				if err := updater.Apply(exe, path); err != nil {
-					log.Printf("apply update %s: %v", ver, err)
-					notify.Error("Guise", "Could not install the update:\n"+err.Error())
-					continue
+				if installPending() {
+					return // Shutting down; otherwise the apply failed — keep running.
 				}
-				// The replacement is already starting; shut this instance down
-				// so only the new tray remains.
-				log.Printf("applied update %s; relaunching and quitting", ver)
-				close(done)
-				systray.Quit()
-				return
 			case <-mAutoUpdate.ClickedCh:
 				enable := !mAutoUpdate.Checked()
 				cfg, err := config.Load()
@@ -314,8 +356,7 @@ func onReady(exe string) {
 					mAutostart.Uncheck()
 				}
 			case <-mQuit.ClickedCh:
-				close(done)
-				systray.Quit()
+				quit()
 				return
 			}
 		}
