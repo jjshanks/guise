@@ -1,0 +1,31 @@
+name: Feature request
+description: Suggest an improvement or new capability for guise.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        guise is intentionally small and is driven by `SPEC.md`. Proposals that
+        change behavior should fit the design invariants there (HKCU-only,
+        stateless ROUTE, fail-open routing). Worth skimming SPEC before filing.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What are you trying to do that guise makes hard or impossible today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like guise to do?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you tried or other approaches you weighed.
+    validations:
+      required: false

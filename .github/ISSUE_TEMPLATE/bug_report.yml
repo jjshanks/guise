@@ -1,0 +1,75 @@
+name: Bug report
+description: Something in guise misbehaves — wrong profile, no launch, a crash, etc.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. guise logs one line per click to
+        `%APPDATA%\Guise\guise.log` — that line (input URL, winning rule,
+        resolved profile, launch result) is usually the fastest path to a fix.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you expect, and what did guise do instead?
+      placeholder: |
+        I clicked a github.com link and expected Profile 3, but Chrome opened the default profile.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Include the exact URL clicked, if you can share it.
+      placeholder: |
+        1. Click this link: https://github.com/...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: log-line
+    attributes:
+      label: Relevant log line(s)
+      description: Paste the matching line(s) from `%APPDATA%\Guise\guise.log`.
+      render: text
+    validations:
+      required: false
+  - type: textarea
+    id: rules
+    attributes:
+      label: Relevant rule(s)
+      description: >
+        Paste the rule(s) from `%APPDATA%\Guise\config.json` involved.
+        Redact anything sensitive.
+      render: json
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: guise version
+      description: From `guise.exe --version` (or the tray menu header).
+      placeholder: v1.2.3
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      description: Settings → System → About, or `winver`.
+      placeholder: Windows 11 23H2 (build 22631)
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Which mode?
+      options:
+        - ROUTE (clicking a link)
+        - TRAY (tray icon / rule editor)
+        - SETUP (--register / --unregister)
+        - Auto-update
+        - Not sure
+    validations:
+      required: true

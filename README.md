@@ -160,6 +160,17 @@ go test ./...
 $env:GUISE_REGISTRY_IT=1; go test ./internal/winreg/ -run RoundTrip
 ```
 
+## Contributing
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the build
+and test workflow, the platform-split convention, and the design invariants to
+preserve. Please also read [SPEC.md](SPEC.md), the authoritative design document.
+
+- **Code of conduct:** [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- **Reporting a vulnerability:** [SECURITY.md](SECURITY.md) (please report
+  privately, not via a public issue)
+- **Changelog:** [CHANGELOG.md](CHANGELOG.md)
+
 ## License
 
-[MIT](LICENSE) © Joshua Shanks
+[MIT](LICENSE.md) © Joshua Shanks
