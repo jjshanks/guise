@@ -19,7 +19,7 @@ jobs:
     # *_windows.go files), so the whole module only builds on Windows.
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-go@v5
         with:
