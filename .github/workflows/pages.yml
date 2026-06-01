@@ -1,0 +1,71 @@
+# Build the Hugo docs site (website/) and publish it to GitHub Pages.
+# Pages source must be set to "GitHub Actions" in repo Settings → Pages.
+name: Deploy docs to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    # Only rebuild when something the site depends on changes.
+    paths:
+      - "website/**"
+      - "SPEC.md"
+      - "docs/logo.png"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+# Least-privilege token plus the OIDC + pages perms the deploy step needs.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never run two deploys at once; let an in-flight run finish (don't cancel).
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      HUGO_VERSION: 0.162.1
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@v6
+
+      # Hugo Modules (the hugo-book theme) are fetched via the Go toolchain.
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      # Extended Hugo is required — hugo-book compiles SCSS.
+      - name: Install Hugo (extended)
+        uses: peaceiris/actions-hugo@v3
+        with:
+          hugo-version: ${{ env.HUGO_VERSION }}
+          extended: true
+
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Build
+        run: hugo --gc --minify --baseURL "${{ steps.pages.outputs.base_url }}/"
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: website/public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

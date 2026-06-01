@@ -1,0 +1,4 @@
+# Hugo build output and locks — the site is built fresh by CI.
+/public/
+/resources/
+.hugo_build.lock

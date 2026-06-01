@@ -1,0 +1,46 @@
+# Hugo config for the guise docs site (GitHub Pages project site).
+# baseURL must include the /guise/ subpath because this is a *project* page
+# served at https://<user>.github.io/<repo>/. The release workflow can override
+# it with --baseURL if the hosting ever changes.
+baseURL = "https://jjshanks.github.io/guise/"
+title = "guise"
+
+# hugo-book is pulled in as a Hugo Module (see go.mod) — no git submodule.
+theme = ["github.com/alex-shpak/hugo-book"]
+
+# README.md / SPEC.md contain raw HTML (centered logo, etc.). Goldmark strips
+# raw HTML unless unsafe rendering is on. We control all the source, so it's safe.
+[markup]
+  [markup.goldmark.renderer]
+    unsafe = true
+  [markup.tableOfContents]
+    startLevel = 2
+    endLevel = 3
+
+[module]
+  [[module.imports]]
+    path = "github.com/alex-shpak/hugo-book"
+  # Declaring any mount overrides ALL default mounts, so re-declare the
+  # standard content/static dirs alongside the file mounts below.
+  [[module.mounts]]
+    source = "content"
+    target = "content"
+  [[module.mounts]]
+    source = "static"
+    target = "static"
+  # Single source of truth: mount the repo-root SPEC.md straight into the docs
+  # tree. Edits to SPEC.md flow to the site with no copy step and no drift.
+  [[module.mounts]]
+    source = "../SPEC.md"
+    target = "content/docs/spec.md"
+  # Reuse the existing project logo as a site asset.
+  [[module.mounts]]
+    source = "../docs/logo.png"
+    target = "static/logo.png"
+
+[params]
+  # hugo-book options — render the right-hand table of contents and a repo link.
+  BookToC = true
+  BookRepo = "https://github.com/jjshanks/guise"
+  BookEditPath = "edit/main"
+  BookSearch = true
