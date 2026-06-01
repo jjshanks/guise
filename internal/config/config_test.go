@@ -39,6 +39,17 @@ func TestLoadMalformedReturnsDefaultAndError(t *testing.T) {
 	}
 }
 
+func TestSaveDoesNotMutateInput(t *testing.T) {
+	t.Setenv("APPDATA", t.TempDir())
+	cfg := &Config{Rules: []Rule{}} // Version intentionally left at 0.
+	if err := Save(cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if cfg.Version != 0 {
+		t.Errorf("Save mutated caller's Version to %d, want it left at 0", cfg.Version)
+	}
+}
+
 func TestSaveLoadRoundTripAtomic(t *testing.T) {
 	t.Setenv("APPDATA", t.TempDir())
 	want := &Config{

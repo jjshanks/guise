@@ -39,14 +39,21 @@ func Setup() (*os.File, error) {
 		return nil, fmt.Errorf("opening log: %w", err)
 	}
 	log.SetOutput(f)
-	log.SetFlags(log.LstdFlags | log.Lmsgprefix)
+	log.SetFlags(log.LstdFlags) // Date + time; no prefix is set, so Lmsgprefix would be a no-op.
 	return f, nil
 }
 
+// rotateIfLarge moves an oversized log aside to guise.log.1 (overwriting any
+// previous one) so the live file stays small (§9). It is best-effort and safe
+// under the occasional concurrent ROUTE process (a double-click spawns two):
+// os.Rename is atomic, so at worst two near-simultaneous clicks each rotate once
+// and the large content still lands in guise.log.1 — and because every log line
+// is emitted as a single O_APPEND write, concurrent writers interleave whole
+// lines but never corrupt one. A cross-process lock would buy nothing here.
 func rotateIfLarge(path string) {
 	info, err := os.Stat(path)
 	if err != nil || info.Size() < maxLogSize {
 		return
 	}
-	_ = os.Rename(path, path+".1") // Best effort; a failed rotate must not block logging.
+	_ = os.Rename(path, path+".1") // A failed rotate must not block logging.
 }

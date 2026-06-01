@@ -74,10 +74,13 @@ func Load() (*Config, error) {
 // directory and renames it over the target (§6.2), so a crash mid-write can
 // never leave a half-written config.
 func Save(cfg *Config) error {
-	if cfg.Version == 0 {
-		cfg.Version = SchemaVersion
+	// Default the version on a copy so Save has no observable side effect on the
+	// caller's struct (the Rules slice is shared but never mutated here).
+	out := *cfg
+	if out.Version == 0 {
+		out.Version = SchemaVersion
 	}
-	data, err := json.MarshalIndent(cfg, "", "  ")
+	data, err := json.MarshalIndent(&out, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encoding config: %w", err)
 	}

@@ -65,6 +65,23 @@ func TestMatchSkipsBrokenPattern(t *testing.T) {
 	}
 }
 
+func TestMatchSkipsEmptyPattern(t *testing.T) {
+	// An empty regex matches every URL; a blank (unfinished) rule must not
+	// capture all routing and short-circuit the rules below it.
+	c := cfg(
+		config.Rule{ID: "blank", Enabled: true, Pattern: "", ProfileDirectory: "Profile 9"},
+		config.Rule{ID: "real", Enabled: true, Pattern: `example\.com`, ProfileDirectory: "Profile 1"},
+	)
+	got := Match(c, "https://example.com")
+	if !got.Matched || got.Rule.ID != "real" {
+		t.Errorf("blank rule should be skipped, real rule should win: %+v", got)
+	}
+	// A blank rule alone yields no match → Chrome default.
+	if Match(cfg(config.Rule{ID: "blank", Enabled: true, Pattern: ""}), "https://anything").Matched {
+		t.Error("a lone blank rule should not match")
+	}
+}
+
 func TestMatchCaseSensitiveByDefault(t *testing.T) {
 	c := cfg(config.Rule{ID: "1", Enabled: true, Pattern: `GitHub`, ProfileDirectory: "Profile 3"})
 	if Match(c, "https://github.com").Matched {

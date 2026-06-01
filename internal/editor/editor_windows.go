@@ -51,7 +51,14 @@ type window struct {
 	mw       *walk.MainWindow
 	cfg      *config.Config
 	profiles []chrome.Profile
-	model    *rulesModel
+	// profileOptions are the profile directories the dropdown offers, in combo
+	// order (the no-profile sentinel sits at index 0, ahead of these). It is the
+	// union of discovered profiles and any directory already referenced by a
+	// rule, so a rule whose profile is missing from Local State still has a
+	// stable index and round-trips through an edit instead of being silently
+	// reset to "Chrome default".
+	profileOptions []string
+	model          *rulesModel
 
 	tv         *walk.TableView
 	enabledCB  *walk.CheckBox
@@ -82,9 +89,34 @@ func Show() error {
 	}
 	w.cfg = cfg
 	w.profiles, _ = chrome.Profiles() // Best effort; dropdown may be empty.
+	w.profileOptions = profileOptionDirs(w.profiles, w.cfg.Rules)
 	w.model = &rulesModel{rules: &w.cfg.Rules, nameFor: w.friendlyName}
 
 	return w.build()
+}
+
+// profileOptionDirs returns the profile directories to show in the dropdown:
+// every discovered profile, followed by any non-empty directory referenced by a
+// rule that discovery did not return (a profile deleted/renamed in Chrome, or
+// any directory at all when Local State is unreadable). Including those keeps a
+// configured-but-missing profile selectable, so editing another field on its
+// rule no longer collapses the value to "Chrome default".
+func profileOptionDirs(profiles []chrome.Profile, rules []config.Rule) []string {
+	seen := make(map[string]bool, len(profiles))
+	dirs := make([]string, 0, len(profiles))
+	add := func(dir string) {
+		if dir != "" && !seen[dir] {
+			seen[dir] = true
+			dirs = append(dirs, dir)
+		}
+	}
+	for _, p := range profiles {
+		add(p.Directory)
+	}
+	for i := range rules {
+		add(rules[i].ProfileDirectory)
+	}
+	return dirs
 }
 
 func (w *window) build() error {
@@ -205,12 +237,13 @@ func friendlyName(profiles []chrome.Profile, dir string) string {
 }
 
 // fillProfileCombo loads the profile dropdown with friendly names. The model
-// strings line up index-for-index with w.profiles.
+// strings line up index-for-index with w.profileOptions (offset by the
+// sentinel at index 0).
 func (w *window) fillProfileCombo() {
-	items := make([]string, 0, len(w.profiles)+1)
+	items := make([]string, 0, len(w.profileOptions)+1)
 	items = append(items, "(Chrome default — no profile)")
-	for _, p := range w.profiles {
-		items = append(items, w.friendlyName(p.Directory))
+	for _, dir := range w.profileOptions {
+		items = append(items, w.friendlyName(dir))
 	}
 	w.profileCB.SetModel(items)
 }
@@ -218,17 +251,19 @@ func (w *window) fillProfileCombo() {
 // profileForComboIndex maps a combo index back to a profile directory. Index 0
 // is the no-profile sentinel.
 func (w *window) profileForComboIndex(i int) string {
-	if i <= 0 || i-1 >= len(w.profiles) {
+	if i <= 0 || i-1 >= len(w.profileOptions) {
 		return ""
 	}
-	return w.profiles[i-1].Directory
+	return w.profileOptions[i-1]
 }
 
-// comboIndexForProfile finds the combo index for a directory; unknown
-// directories map to the no-profile sentinel so the user notices and re-picks.
+// comboIndexForProfile finds the combo index for a directory. A non-empty
+// directory is always present in w.profileOptions (Show seeds it with every
+// configured directory), so an existing rule round-trips; only the empty
+// "Chrome default" value maps to the sentinel at index 0.
 func (w *window) comboIndexForProfile(dir string) int {
-	for i, p := range w.profiles {
-		if p.Directory == dir {
+	for i, d := range w.profileOptions {
+		if d == dir {
 			return i + 1
 		}
 	}
@@ -281,9 +316,11 @@ func (w *window) onPatternChanged() {
 }
 
 // validatePattern flags an invalid RE2 pattern inline (§6.2 live validation).
+// An empty pattern is called out specifically: routing now skips blank rules
+// (see router.Match), so the editor warns rather than leaving the field silent.
 func (w *window) validatePattern(pattern string) {
 	if pattern == "" {
-		w.patternErr.SetText("")
+		w.patternErr.SetText("⚠ empty pattern — this rule is ignored")
 		return
 	}
 	if _, err := regexp.Compile(pattern); err != nil {

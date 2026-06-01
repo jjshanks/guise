@@ -27,6 +27,9 @@ type Result struct {
 // Semantics, locked in by the spec:
 //   - rules are evaluated top to bottom, first match wins;
 //   - disabled rules are skipped;
+//   - a blank pattern is skipped — an empty regex matches every URL, so an
+//     unfinished rule must not silently capture all routing (the editor warns
+//     about it too);
 //   - patterns are unanchored RE2 (regexp.MatchString) and case-sensitive;
 //   - a pattern that fails to compile is logged and skipped — a broken rule
 //     must never break routing;
@@ -35,6 +38,11 @@ func Match(cfg *config.Config, url string) Result {
 	for i := range cfg.Rules {
 		r := &cfg.Rules[i]
 		if !r.Enabled {
+			continue
+		}
+		if r.Pattern == "" {
+			// regexp.Compile("") matches everything; treat a blank rule as inert
+			// so an unfinished rule can't hijack all routing.
 			continue
 		}
 		re, err := regexp.Compile(r.Pattern)
