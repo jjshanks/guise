@@ -207,6 +207,15 @@ func (w *window) build() error {
 		return err
 	}
 
+	// Title-bar icon (top-left): reuse the app icon already embedded in the exe.
+	// rsrc (see the //go:generate line in main_windows.go) writes the manifest as
+	// resource ID 1 and the icon group as ID 2; LoadImage resolves the group to
+	// the best size for the title bar. Fail soft — a missing resource just leaves
+	// the Windows default, never breaking the editor.
+	if icon, err := walk.NewIconFromResourceId(2); err == nil {
+		w.mw.SetIcon(icon)
+	}
+
 	w.fillProfileCombo()
 	w.populate() // Clears detail pane (nothing selected yet).
 
