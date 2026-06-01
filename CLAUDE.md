@@ -47,7 +47,7 @@ registered executable for every clicked link, so each invocation must be self-co
 | Invocation | Mode | Behavior |
 |---|---|---|
 | `guise.exe <url>` | ROUTE | load config, match, exec Chrome, exit immediately. The hot path. |
-| `guise.exe --tray` | TRAY | long-lived: tray icon + `walk` rule editor. The only persistent process. |
+| `guise.exe --tray` | TRAY | long-lived: tray icon + `walk` rule editor + background GitHub-release update check (§14). The only persistent process. |
 | `guise.exe --register` / `--unregister` | SETUP | write/remove HKCU registry entries, exit. |
 | `guise.exe --version` (`-v`) | — | print the stamped build version (to the parent console, else a dialog) and exit. |
 
@@ -90,10 +90,11 @@ internal/config      config schema, load, atomic save (write temp + os.Rename)
 internal/router      ordered RE2 matching + ROUTE-mode Chrome launch  ← the heart (SPEC §12)
 internal/chrome      Chrome profile discovery (Local State JSON) + chrome.exe resolution (SPEC §4)
 internal/winreg      HKCU registration, default-browser detection, autostart Run key (SPEC §3, §7)
-internal/tray        systray menu + GUI-thread dispatch (SPEC §6.1)
+internal/tray        systray menu + GUI-thread dispatch (SPEC §6.1) + background update check (SPEC §14)
 internal/editor      walk rule editor + test-URL dialog (SPEC §6.2)
+internal/updater     GitHub-release check, SHA256-verified download, rename-in-place self-update (SPEC §14)
 internal/applog      log file + rotation; one line per click (SPEC §9)
-internal/notify      Windows message-box notifications (SPEC §10)
+internal/notify      Windows message-box notifications incl. Yes/No confirm (SPEC §10)
 internal/winutil     shell-open helper (deep-link to ms-settings:defaultapps)
 internal/version     build version stamped from git tags via -ldflags -X (pure, cross-platform)
 internal/assets      go:embed tray icon

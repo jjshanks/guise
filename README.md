@@ -71,6 +71,25 @@ like `v1.2.3-5-gabc1234`; with no tags yet, `v0.0.0-dev+<sha>`.
 Check a binary's version with `guise.exe --version`; the tray menu's header also
 shows it.
 
+## Auto-update
+
+The tray keeps itself current (§14). At startup and once a day it checks the
+[latest GitHub release](https://github.com/jjshanks/guise/releases/latest); if a
+newer **stable** tag exists, it downloads `guise.exe`, verifies it against the
+release's `guise.exe.sha256`, and reveals an **Install update vX.Y.Z** menu item.
+Clicking it (with a confirm) swaps the binary in place — keeping the registered
+path stable so the default-browser registration still points at it — and
+restarts the tray.
+
+- **Toggle:** **Check for updates automatically** (tray checkbox, on by default;
+  persisted as `"auto_update"` in `config.json`). **Check for updates now…** runs
+  on demand regardless of the toggle.
+- Only **stable** releases trigger an update — pre-release tags (`v1.2.3-rc1`)
+  are ignored. Development builds (no clean release tag) never auto-update.
+- The check runs only in the tray, never on the routing hot path, and fails
+  soft: a network error or checksum mismatch is logged and the tray keeps
+  running. The binary is replaced only when you click Install.
+
 ## Install
 
 No installer or admin rights needed:
@@ -122,8 +141,9 @@ internal/config            config schema, load, atomic save (§5)
 internal/router            ordered RE2 matching + ROUTE-mode launch (§5.3, §12)
 internal/chrome            profile discovery + chrome.exe resolution (§4)
 internal/winreg            HKCU registration, default detection, autostart (§3, §7)
-internal/tray              systray menu + GUI thread dispatch (§6.1)
+internal/tray              systray menu + GUI thread dispatch (§6.1) + update check (§14)
 internal/editor            walk rule editor + test dialog (§6.2)
+internal/updater           GitHub-release check + verified download + self-update (§14)
 internal/applog            log file + rotation (§9)
 internal/notify            Windows message-box notifications (§10)
 internal/winutil           shell-open helper (§3.3, §6.1)

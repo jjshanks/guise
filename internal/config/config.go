@@ -25,8 +25,23 @@ type Rule struct {
 type Config struct {
 	Version    int    `json:"version"`
 	ChromePath string `json:"chrome_path"` // Empty = auto-detect (§4.3).
+	// AutoUpdate toggles the tray's background check for new GitHub releases
+	// (§14). A pointer so an absent field (older configs, fresh installs) is
+	// distinguishable from an explicit false: nil means enabled, so auto-update
+	// is on by default without having to rewrite existing configs.
+	AutoUpdate *bool  `json:"auto_update,omitempty"`
 	Rules      []Rule `json:"rules"`
 }
+
+// AutoUpdateEnabled reports whether the tray should check for new releases in
+// the background. An absent (nil) value counts as enabled (§14).
+func (c *Config) AutoUpdateEnabled() bool {
+	return c.AutoUpdate == nil || *c.AutoUpdate
+}
+
+// SetAutoUpdate records an explicit on/off choice from the tray toggle so it
+// persists across restarts.
+func (c *Config) SetAutoUpdate(on bool) { c.AutoUpdate = &on }
 
 // SchemaVersion is the current config schema version.
 const SchemaVersion = 1

@@ -400,3 +400,36 @@ Two things this encodes: the no-match path deliberately leaves `profileDir` empt
 **Config hot-reload / file watcher / "Reload config" menu item.** Rejected as solving a non-problem. ROUTE mode re-reads config from disk on every single click (it's a fresh process each time), and the tray editor re-reads on open. There is never stale in-memory config to refresh.
 
 **Anchored-by-default matching.** Rejected in favor of unanchored. Unanchored is more convenient for the common case of host/path fragments; the documented trade-off (a pattern matching more broadly than intended) is surfaced by the editor's test panel rather than prevented by forcing anchors.
+
+---
+
+## 14. Auto-update (checking GitHub releases)
+
+The tray keeps itself current by checking the project's GitHub Releases for a newer build and installing it on the user's confirmation. Releases are tag-driven (see §8 / `release.yml`): pushing a `vX.Y.Z` tag publishes a `guise.exe` asset plus a `guise.exe.sha256` checksum, and `internal/version` carries the running build's tag. The updater compares the two.
+
+### 14.1 Where it runs — TRAY only
+
+The check lives **exclusively in TRAY mode**, never ROUTE. ROUTE is the stateless hot path (§2): it must stay fast, do no network I/O, and add nothing to a link click. The tray is the one long-lived process and the natural home for a periodic background task. This mirrors the existing default-browser status poll (§6.1).
+
+### 14.2 The flow: check → download → verify → apply
+
+1. **Check.** Query `GET https://api.github.com/repos/jjshanks/guise/releases/latest`. This endpoint returns the newest **stable** release — GitHub excludes pre-releases and drafts — so hyphenated tags (`v1.2.3-rc1`) never surface (decided: stable only). A `User-Agent` header is sent (GitHub requires one).
+2. **Compare.** `IsNewer(current, latest)` parses both as clean release tags (`vMAJOR.MINOR.PATCH`) and compares numerically. A development build — the `dev` default, a `git describe` "ahead of tag" string like `v1.2.3-5-gabc1234`, or any build with `+metadata` — is **not** a release tag, so it never reports an available update and never even hits the API on a background tick. Developers are not nagged to "update" to an older published tag.
+3. **Download + verify.** Fetch the `guise.exe` asset into the directory holding the running exe, streaming it through a SHA-256 hasher, and compare against the digest in the release's `guise.exe.sha256` asset. **A mismatch is a hard failure**: the partial file is deleted and nothing becomes installable. The verified file is named `guise.exe.new` so it can never clobber the running `guise.exe`.
+4. **Apply (on the user's click).** Decided behavior: **download automatically, install on one click.** When a verified update is ready, the tray reveals an "Install update vX.Y.Z" menu item and posts a notification. Clicking it (after a Yes/No confirm) performs the swap and relaunches.
+
+### 14.3 Replacing a running, registered binary (Windows)
+
+The exe path is baked into the HKCU default-browser registration (§3), so it must stay stable across an update — re-registering on every update would be fragile. Windows forbids overwriting a running image but **permits renaming it**, so the swap is two renames in the same directory:
+
+1. Move the running `guise.exe` aside to `guise.exe.old`.
+2. Move `guise.exe.new` into `guise.exe` (the registered path — unchanged).
+3. Launch the new `guise.exe --tray`, then quit this instance so only the new tray remains.
+
+If step 2 fails, step 1 is rolled back so the registered path always resolves to a working binary. The leftover `guise.exe.old` cannot be deleted by the outgoing process (it is the image still executing); the **next** tray startup removes it (best-effort: it may take one more start if the old process is still exiting).
+
+### 14.4 Toggle, cadence, and failing soft
+
+- **Toggle.** A `"auto_update"` config field (absent ⇒ enabled) backs a tray checkbox, "Check for updates automatically." A manual "Check for updates now…" item is always available regardless of the toggle and reports its outcome (up to date / downloaded / error / "development build").
+- **Cadence.** One check at tray startup, then every 24 h while running. Releases are infrequent, so this keeps API traffic negligible; GitHub's unauthenticated rate limit is far above what a daily check needs.
+- **Fail soft.** Like routing (§2), the update path never takes the tray down. Network errors, API failures, and checksum mismatches are logged (§9) and, for a *manual* check, shown to the user; a *background* check stays silent unless an update is actually ready. Only the explicit user-driven Apply step replaces the binary.
