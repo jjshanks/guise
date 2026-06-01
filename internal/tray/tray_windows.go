@@ -86,7 +86,6 @@ func onReady(exe string) {
 	mEdit := systray.AddMenuItem("Edit rules…", "Open the rule editor")
 	mFolder := systray.AddMenuItem("Open config folder", "Open %APPDATA%\\Guise in Explorer")
 	systray.AddSeparator()
-	mTest := systray.AddMenuItem("Test a URL…", "See which rule would match a URL")
 	// Update controls (§14). mInstall stays hidden until a verified download is
 	// ready to apply.
 	mUpdateNow := systray.AddMenuItem("Check for updates now…", "Check GitHub for a newer release")
@@ -255,12 +254,6 @@ func onReady(exe string) {
 				if err := winutil.ShellOpen(config.Dir()); err != nil {
 					log.Printf("open config folder: %v", err)
 				}
-			case <-mTest.ClickedCh:
-				postGUI(func() {
-					if err := editor.ShowTest(); err != nil {
-						log.Printf("test dialog: %v", err)
-					}
-				})
 			case <-mUpdateNow.ClickedCh:
 				go checkForUpdate(true)
 			case <-mInstall.ClickedCh:

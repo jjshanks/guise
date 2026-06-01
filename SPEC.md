@@ -243,8 +243,6 @@ Guise
 Edit rules…
 Open config folder
 ─────────────────
-Test a URL…
-─────────────────
 Start at login        [toggle]
 Quit
 ```
@@ -252,8 +250,9 @@ Quit
 - **Default browser status** — live indicator from §3.3 detection. If "No", clicking opens `ms-settings:defaultapps`.
 - **Edit rules…** — opens the editor window (§6.2).
 - **Open config folder** — opens `%APPDATA%\Guise\` in Explorer for manual edits or log inspection.
-- **Test a URL…** — input box; shows which rule would match (or "no match → Chrome default") and which profile would launch, *without* launching. Critical for debugging unanchored patterns without clicking real links.
 - **Start at login** — toggles the autostart registry value (§7).
+
+(URL testing lives in the rule editor's "Test URL" field (§6.2), not the tray menu.)
 
 (There is deliberately no "Reload config" item: routing re-reads config on every click, and the editor re-reads on open, so there is no stale in-memory state to refresh.)
 
@@ -331,7 +330,7 @@ HKCU = no elevation. Only the **tray** autostarts; routing needs nothing residen
 1. **ROUTE core** — hardcode one rule, prove `guise.exe <url>` launches the right Chrome profile. (Validates the whole premise fastest.)
 2. **Config loader + matcher** — JSON + ordered unanchored RE2 matching + no-match-means-no-flag fallback + a "test URL" function (no GUI).
 3. **Registration** — `--register`/`--unregister`, default-state detection, deep-link to settings.
-4. **Tray** — icon, menu, default-browser status indicator, test-a-URL dialog.
+4. **Tray** — icon, menu, default-browser status indicator.
 5. **Editor window** — table CRUD, reorder, profile dropdown from `Local State`, atomic save, live validation.
 6. **Autostart + packaging** — Run key toggle, manifest, icon embed, installer.
 
