@@ -40,10 +40,13 @@ func Route(url string) error {
 
 	res := Match(cfg, url)
 	profileDir := res.ProfileDirectory
+	// rule is the matched rule id, or "default" on no match. It is carried to the
+	// single per-click line emitted after launch (§9: one line per click). The
+	// match decision is not logged on its own line — the final routed/launch line
+	// records which rule won, so the log stays one consolidated line per click.
+	rule := "default"
 	if res.Matched {
-		log.Printf("matched rule %s -> profile %q for %q", res.Rule.ID, profileDir, url)
-	} else {
-		log.Printf("no rule matched %q -> Chrome default", url)
+		rule = res.Rule.ID
 	}
 
 	// A profile must be syntactically valid and still exist; otherwise fall back
@@ -64,11 +67,11 @@ func Route(url string) error {
 
 	args := launchArgs(profileDir, url)
 	if err := startProcess(chromePath, args...); err != nil {
-		log.Printf("launch failed chrome=%q args=%v: %v", chromePath, args, err)
+		log.Printf("launch failed url=%q rule=%q profile=%q chrome=%q: %v", url, rule, profileDir, chromePath, err)
 		notifyError("Guise", "Failed to launch Chrome:\n"+err.Error())
 		return fmt.Errorf("launching chrome: %w", err)
 	}
-	log.Printf("launched chrome=%q profile=%q url=%q", chromePath, profileDir, url)
+	log.Printf("routed url=%q rule=%q profile=%q chrome=%q", url, rule, profileDir, chromePath)
 	return nil
 }
 

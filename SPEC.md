@@ -347,6 +347,7 @@ func route(url string) error {
     cfg := loadConfigOrLastGood()       // never fatal
 
     profileDir := ""                    // "" means: no --profile-directory flag
+    rule := "default"                   // matched rule id, or "default" on no match
     for _, r := range cfg.Rules {
         if !r.Enabled {
             continue
@@ -357,13 +358,9 @@ func route(url string) error {
             continue
         }
         if re.MatchString(url) {
-            profileDir = r.ProfileDirectory
-            log.Printf("matched rule %s → profile %q", r.ID, profileDir)
+            profileDir, rule = r.ProfileDirectory, r.ID
             break
         }
-    }
-    if profileDir == "" {
-        log.Printf("no rule matched %q → Chrome default", url)
     }
 
     chrome := resolveChromePath(cfg)     // §4.3
@@ -374,7 +371,10 @@ func route(url string) error {
     if url != "" {
         args = append(args, url)
     }
-    return exec.Command(chrome, args...).Start() // Start, not Run — don't wait
+    err := exec.Command(chrome, args...).Start() // Start, not Run — don't wait
+    // One consolidated line per click (§9): which rule won, where it routed.
+    log.Printf("routed url=%q rule=%q profile=%q chrome=%q", url, rule, profileDir, chrome)
+    return err
 }
 ```
 
