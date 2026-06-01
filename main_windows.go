@@ -18,6 +18,7 @@ package main
 import (
 	"log"
 	"os"
+	"strings"
 
 	"guise/internal/applog"
 	"guise/internal/notify"
@@ -26,40 +27,73 @@ import (
 	"guise/internal/winreg"
 )
 
+// main keeps no logic of its own beyond translating run's exit code: calling
+// os.Exit here (rather than inside run) is what lets run's deferred log close
+// actually execute before the process ends.
 func main() {
+	os.Exit(run())
+}
+
+// run dispatches on argv and returns the process exit code.
+func run() int {
 	if f, err := applog.Setup(); err != nil {
 		log.Printf("logging setup failed, using default: %v", err)
 	} else {
 		defer f.Close()
 	}
 
-	exe, err := os.Executable()
-	if err != nil {
-		log.Printf("resolving own path: %v", err)
-	}
-
 	args := os.Args[1:]
 	switch {
 	case len(args) == 0:
 		// No argument in ROUTE mode: launch Chrome normally (§10).
-		exitOnErr(router.Route(""))
-	case args[0] == "--tray":
-		tray.Run(exe) // Blocks until Quit.
-	case args[0] == "--register":
-		register(exe)
+		return routeExit(router.Route(""))
 	case args[0] == "--unregister":
-		unregister()
+		// Unregister only deletes keys, so it needs no exe path.
+		return unregister()
+	case args[0] == "--register":
+		exe, ok := selfPath()
+		if !ok {
+			return 1
+		}
+		return register(exe)
+	case args[0] == "--tray":
+		exe, ok := selfPath()
+		if !ok {
+			return 1
+		}
+		tray.Run(exe) // Blocks until Quit.
+		return 0
+	case strings.HasPrefix(args[0], "-"):
+		// A URL Windows hands us always starts with a scheme, never a dash.
+		// An unrecognized flag is a misinvocation; forwarding it to Chrome as a
+		// "URL" would let Chrome parse it as a switch, so reject it instead.
+		log.Printf("unknown flag %q (expected a URL or a mode flag)", args[0])
+		return 2
 	default:
 		// ROUTE mode: the first argument is the URL Windows handed us (§3.1).
-		exitOnErr(router.Route(args[0]))
+		return routeExit(router.Route(args[0]))
 	}
 }
 
-func register(exe string) {
+// selfPath resolves this executable's path, which --register and --tray bake
+// into the registry. On failure it surfaces the problem and reports !ok: an
+// empty or wrong path would silently produce a default-browser registration
+// that launches nothing, so these modes must fail loudly rather than continue.
+func selfPath() (string, bool) {
+	exe, err := os.Executable()
+	if err != nil {
+		log.Printf("resolving own path: %v", err)
+		notify.Error("Guise", "Could not determine the Guise executable path.\n\nSetup cannot continue.")
+		return "", false
+	}
+	return exe, true
+}
+
+func register(exe string) int {
 	if err := winreg.Register(exe); err != nil {
 		log.Printf("register: %v", err)
 		notify.Error("Guise", "Registration failed:\n"+err.Error())
-		os.Exit(1)
+		return 1
 	}
 	log.Printf("registered exe=%q", exe)
 
@@ -71,22 +105,25 @@ func register(exe string) {
 		msg += "To finish, set it as your default in:\nSettings → Apps → Default apps → Guise → Set default."
 	}
 	notify.Info("Guise", msg)
+	return 0
 }
 
-func unregister() {
+func unregister() int {
 	if err := winreg.Unregister(); err != nil {
 		log.Printf("unregister: %v", err)
 		notify.Error("Guise", "Unregister failed:\n"+err.Error())
-		os.Exit(1)
+		return 1
 	}
 	log.Printf("unregistered")
 	notify.Info("Guise", "Guise has been unregistered.")
+	return 0
 }
 
-// exitOnErr leaves a non-zero exit code on routing failure for scripted use,
+// routeExit maps a routing error to a non-zero exit code for scripted use,
 // without printing (the windowsgui binary has no console).
-func exitOnErr(err error) {
+func routeExit(err error) int {
 	if err != nil {
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }

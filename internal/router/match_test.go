@@ -92,3 +92,11 @@ func TestMatchCaseSensitiveByDefault(t *testing.T) {
 		t.Error("(?i) prefix should enable case-insensitive matching")
 	}
 }
+
+func TestMatchNilConfig(t *testing.T) {
+	// Match is exported and reuse-encouraged; a nil config must yield no match
+	// rather than panic.
+	if Match(nil, "https://github.com").Matched {
+		t.Error("nil config should not match")
+	}
+}

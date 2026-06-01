@@ -10,6 +10,18 @@ import (
 	"guise/internal/notify"
 )
 
+// Seams for testing. startProcess launches Chrome detached (Start, not Run, so
+// ROUTE mode exits immediately rather than lingering as Chrome's parent);
+// notifyError pops a Windows message box, which blocks until dismissed. Tests
+// override both so the launch decision can be asserted without spawning Chrome
+// or popping a modal dialog.
+var (
+	startProcess = func(path string, args ...string) error {
+		return exec.Command(path, args...).Start()
+	}
+	notifyError = notify.Error
+)
+
 // Route is the heart of ROUTE mode (§12): load config, match the URL against
 // the ordered rules, resolve chrome.exe, and launch it with the matched
 // profile (or no profile flag on no match). It uses Start, not Run, so the
@@ -46,14 +58,14 @@ func Route(url string) error {
 	chromePath, err := chrome.ResolvePath(cfg.ChromePath)
 	if err != nil {
 		log.Printf("cannot resolve chrome.exe: %v", err)
-		notify.Error("Guise", "Could not find chrome.exe.\n\nSet chrome_path in the config or install Chrome.")
+		notifyError("Guise", "Could not find chrome.exe.\n\nSet chrome_path in the config or install Chrome.")
 		return fmt.Errorf("resolving chrome: %w", err)
 	}
 
 	args := launchArgs(profileDir, url)
-	if err := exec.Command(chromePath, args...).Start(); err != nil {
+	if err := startProcess(chromePath, args...); err != nil {
 		log.Printf("launch failed chrome=%q args=%v: %v", chromePath, args, err)
-		notify.Error("Guise", "Failed to launch Chrome:\n"+err.Error())
+		notifyError("Guise", "Failed to launch Chrome:\n"+err.Error())
 		return fmt.Errorf("launching chrome: %w", err)
 	}
 	log.Printf("launched chrome=%q profile=%q url=%q", chromePath, profileDir, url)

@@ -43,4 +43,10 @@ jobs:
         run: go build -ldflags "-H windowsgui" -o guise.exe .
 
       - name: Test
+        # GUISE_REGISTRY_IT opts in the winreg round-trip test (writes + cleans
+        # up real HKCU browser-registration keys). Safe on an ephemeral runner;
+        # left off by default so a local `go test` never touches a dev's real
+        # registration.
         run: go test ./...
+        env:
+          GUISE_REGISTRY_IT: "1"

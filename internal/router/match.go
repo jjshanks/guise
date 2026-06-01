@@ -35,6 +35,11 @@ type Result struct {
 //     must never break routing;
 //   - no match yields Matched=false, i.e. launch Chrome with no profile flag.
 func Match(cfg *config.Config, url string) Result {
+	if cfg == nil {
+		// Defensive: an exported, reuse-encouraged function must not panic on a
+		// nil config. No config means no rules, i.e. no match → Chrome default.
+		return Result{}
+	}
 	for i := range cfg.Rules {
 		r := &cfg.Rules[i]
 		if !r.Enabled {
