@@ -26,9 +26,18 @@ $env:GUISE_REGISTRY_IT=1; go test ./internal/winreg/ -run RoundTrip
 # Regenerate embedded manifest + icon (committed as rsrc_windows_amd64.syso; rarely needed):
 go install github.com/akavel/rsrc@latest   # rsrc must be on PATH
 go generate ./...
+
+# Canonical build: stamps the version from the nearest git tag (semver) into the binary.
+./scripts/build.ps1                                 # used by CI and the release workflow
 ```
 
 Go 1.26+, GOARCH amd64. Use `python.exe` (never `python3.exe`) per global instructions.
+
+**Releases are git-tag driven.** Pushing a `v*` tag triggers `.github/workflows/release.yml`,
+which builds via `scripts/build.ps1` and publishes a GitHub Release (binary + SHA256). The tag is
+the single source of version truth — `internal/version` is stamped from it via `-ldflags -X`, so
+`guise.exe --version` and the release always agree. Hyphenated tags (`v1.2.3-rc1`) are pre-releases.
+Don't hardcode a version constant in Go; let the tag flow through `scripts/build.ps1`.
 
 ## Architecture
 
@@ -40,6 +49,7 @@ registered executable for every clicked link, so each invocation must be self-co
 | `guise.exe <url>` | ROUTE | load config, match, exec Chrome, exit immediately. The hot path. |
 | `guise.exe --tray` | TRAY | long-lived: tray icon + `walk` rule editor. The only persistent process. |
 | `guise.exe --register` / `--unregister` | SETUP | write/remove HKCU registry entries, exit. |
+| `guise.exe --version` (`-v`) | — | print the stamped build version (to the parent console, else a dialog) and exit. |
 
 Two design invariants that explain the whole system — do not break them without updating SPEC:
 
@@ -74,7 +84,8 @@ breaks on the cross-platform build. Keep pure logic (parsing, matching, profile 
 ## Package map
 
 ```
-main_windows.go      mode dispatch (ROUTE / TRAY / SETUP)
+main_windows.go      mode dispatch (ROUTE / TRAY / SETUP / --version)
+console_windows.go   AttachConsole helper so --version can print to the launching terminal
 internal/config      config schema, load, atomic save (write temp + os.Rename)
 internal/router      ordered RE2 matching + ROUTE-mode Chrome launch  ← the heart (SPEC §12)
 internal/chrome      Chrome profile discovery (Local State JSON) + chrome.exe resolution (SPEC §4)
@@ -84,7 +95,9 @@ internal/editor      walk rule editor + test-URL dialog (SPEC §6.2)
 internal/applog      log file + rotation; one line per click (SPEC §9)
 internal/notify      Windows message-box notifications (SPEC §10)
 internal/winutil     shell-open helper (deep-link to ms-settings:defaultapps)
+internal/version     build version stamped from git tags via -ldflags -X (pure, cross-platform)
 internal/assets      go:embed tray icon
+scripts/build.ps1    version-stamping build, shared by CI and the release workflow
 ```
 
 Config lives at `%APPDATA%\Guise\config.json`; the log at `%APPDATA%\Guise\guise.log`.

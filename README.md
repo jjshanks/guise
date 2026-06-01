@@ -29,6 +29,7 @@ chrome.exe --profile-directory="Profile 3" https://github.com/foo
 | `guise.exe --tray` | TRAY | tray icon + rule editor (autostart this at login) |
 | `guise.exe --register` | SETUP | write HKCU registry entries so the app is an eligible browser |
 | `guise.exe --unregister` | SETUP | remove those entries |
+| `guise.exe --version` | — | print the embedded build version and exit (`-v` works too) |
 
 Every mode writes only to `HKEY_CURRENT_USER`, so nothing ever needs admin
 rights — no UAC, no elevation.
@@ -38,12 +39,37 @@ rights — no UAC, no elevation.
 Requires Go 1.26+ on Windows (amd64).
 
 ```powershell
-go generate ./...   # regenerate rsrc_windows_amd64.syso from the manifest + icon (optional; committed)
-go build -ldflags "-H windowsgui" -o guise.exe .
+go generate ./...        # regenerate rsrc_windows_amd64.syso from the manifest + icon (optional; committed)
+./scripts/build.ps1      # builds guise.exe with the version stamped in from git
 ```
+
+`scripts/build.ps1` is the canonical build: it derives the version from the
+nearest git tag (`git describe`) and stamps it, the commit, and the build date
+into the binary via `-ldflags -X`, always with `-H windowsgui`. A plain
+`go build -ldflags "-H windowsgui" -o guise.exe .` also works but reports its
+version as `dev`.
 
 `-H windowsgui` is essential — without it every link click flashes a console
 window. `go generate` needs `rsrc` on PATH: `go install github.com/akavel/rsrc@latest`.
+
+## Versioning & releases
+
+Versions are [semver](https://semver.org) and the **git tag is the source of
+truth**. To cut a release, push a tag:
+
+```powershell
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+The `Release` workflow (`.github/workflows/release.yml`) then builds `guise.exe`
+with that version stamped in and publishes a GitHub Release with the binary and
+its `guise.exe.sha256` checksum. Tags with a hyphen (e.g. `v1.2.3-rc1`) are
+published as pre-releases. Between tags, builds report a `git describe` version
+like `v1.2.3-5-gabc1234`; with no tags yet, `v0.0.0-dev+<sha>`.
+
+Check a binary's version with `guise.exe --version`; the tray menu's header also
+shows it.
 
 ## Install
 
@@ -101,7 +127,9 @@ internal/editor            walk rule editor + test dialog (§6.2)
 internal/applog            log file + rotation (§9)
 internal/notify            Windows message-box notifications (§10)
 internal/winutil           shell-open helper (§3.3, §6.1)
+internal/version           build version stamped from git tags via -ldflags
 internal/assets            embedded tray icon
+scripts/build.ps1          version-stamping build (used by CI + the release workflow)
 ```
 
 ## Tests

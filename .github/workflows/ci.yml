@@ -39,8 +39,12 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+      # Build through the release script so the version-stamping path is
+      # exercised on every PR and can't rot before a tag is cut. With no tag
+      # reachable it falls back to a v0.0.0-dev+<sha> version.
       - name: Build
-        run: go build -ldflags "-H windowsgui" -o guise.exe .
+        shell: pwsh
+        run: ./scripts/build.ps1 -Output guise.exe
 
       - name: Test
         # GUISE_REGISTRY_IT opts in the winreg round-trip test (writes + cleans

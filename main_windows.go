@@ -7,6 +7,7 @@
 //	guise.exe --tray        TRAY mode   — tray icon + rule editor.
 //	guise.exe --register    SETUP mode  — write HKCU registry entries.
 //	guise.exe --unregister  SETUP mode  — remove them.
+//	guise.exe --version     report the embedded build version and exit.
 //
 // Every invocation is self-contained and self-routing: Windows runs this same
 // exe for each clicked link, so ROUTE mode re-reads config from disk each time.
@@ -16,6 +17,7 @@ package main
 //go:generate rsrc -manifest guise.manifest -ico icon.ico -arch amd64 -o rsrc_windows_amd64.syso
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -24,6 +26,7 @@ import (
 	"guise/internal/notify"
 	"guise/internal/router"
 	"guise/internal/tray"
+	"guise/internal/version"
 	"guise/internal/winreg"
 )
 
@@ -47,6 +50,9 @@ func run() int {
 	case len(args) == 0:
 		// No argument in ROUTE mode: launch Chrome normally (§10).
 		return routeExit(router.Route(""))
+	case args[0] == "--version", args[0] == "-v":
+		printVersion()
+		return 0
 	case args[0] == "--unregister":
 		// Unregister only deletes keys, so it needs no exe path.
 		return unregister()
@@ -117,6 +123,21 @@ func unregister() int {
 	log.Printf("unregistered")
 	notify.Info("Guise", "Guise has been unregistered.")
 	return 0
+}
+
+// printVersion reports the build version (§8). When launched from a terminal it
+// prints one line to that console; when launched without one (e.g.
+// double-clicked) it falls back to a dialog. Unlike --register/--unregister it
+// must not block on a modal in the common scripted case, so the console path is
+// preferred.
+func printVersion() {
+	s := version.String()
+	if con := attachParentConsole(); con != nil {
+		fmt.Fprintln(con, s)
+		_ = con.Close()
+		return
+	}
+	notify.Info("Guise", s)
 }
 
 // routeExit maps a routing error to a non-zero exit code for scripted use,

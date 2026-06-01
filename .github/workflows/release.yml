@@ -1,0 +1,50 @@
+name: Release
+
+# Push a semver tag to cut a release:
+#   git tag v1.2.3 && git push origin v1.2.3
+# The tag is the source of truth for the version: this workflow builds guise.exe
+# with that tag stamped in (via scripts/build.ps1) and publishes it, so the
+# binary's --version matches the release. Pre-release tags (a hyphen in the
+# version, e.g. v1.2.3-rc1) are published as GitHub pre-releases.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write # required to create the release and upload assets
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history + tags so `git describe` resolves the tag
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        shell: pwsh
+        run: ./scripts/build.ps1 -Output guise.exe
+
+      - name: Checksum
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash guise.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  guise.exe" | Out-File -FilePath guise.exe.sha256 -Encoding ascii
+          Write-Host "SHA256: $hash"
+
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $ghArgs = @($tag, 'guise.exe', 'guise.exe.sha256',
+                      '--title', $tag, '--generate-notes')
+          # A hyphen in the semver (v1.2.3-rc1) marks a pre-release.
+          if ($tag -match '-') { $ghArgs += '--prerelease' }
+          gh release create @ghArgs

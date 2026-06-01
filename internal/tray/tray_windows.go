@@ -17,6 +17,7 @@ import (
 	"guise/internal/assets"
 	"guise/internal/config"
 	"guise/internal/editor"
+	"guise/internal/version"
 	"guise/internal/winreg"
 	"guise/internal/winutil"
 )
@@ -62,7 +63,8 @@ func onReady(exe string) {
 	systray.SetTitle("Guise")
 	systray.SetTooltip("Guise — route URLs to Chrome profiles")
 
-	mTitle := systray.AddMenuItem("Guise", "")
+	// Disabled header showing the running build, e.g. "Guise v1.2.3" (§6.1).
+	mTitle := systray.AddMenuItem("Guise "+version.Short(), version.String())
 	mTitle.Disable()
 	systray.AddSeparator()
 	mDefault := systray.AddMenuItem("Default browser: …", "Click to open Default Apps settings")
