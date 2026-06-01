@@ -31,7 +31,7 @@ rights — no UAC, no elevation.
 
 ## Build
 
-Requires Go 1.22+ on Windows (amd64).
+Requires Go 1.26+ on Windows (amd64).
 
 ```powershell
 go generate ./...   # regenerate rsrc_windows_amd64.syso from the manifest + icon (optional; committed)
