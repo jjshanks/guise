@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/logo.png" alt="guise" width="200">
+</p>
+
 # guise
 
 A Windows 11 app that registers as the default web browser and routes each
