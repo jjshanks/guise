@@ -1,0 +1,9 @@
+# Normalize line endings to LF so gofmt and tooling behave identically across
+# platforms (the repo is committed with LF; CRLF working copies break gofmt -l).
+* text=auto eol=lf
+
+# Binary assets must never be line-ending normalized.
+*.exe   binary
+*.ico   binary
+*.syso  binary
+*.manifest text eol=lf

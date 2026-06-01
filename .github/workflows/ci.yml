@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    # guise is a Windows-only app (internal/tray and internal/editor have only
+    # *_windows.go files), so the whole module only builds on Windows.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify gofmt
+        shell: pwsh
+        run: |
+          $unformatted = gofmt -l .
+          if ($unformatted) {
+            Write-Host "These files are not gofmt-formatted:"
+            Write-Host $unformatted
+            exit 1
+          }
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build -ldflags "-H windowsgui" -o guise.exe .
+
+      - name: Test
+        run: go test ./...
