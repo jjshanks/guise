@@ -159,3 +159,7 @@ go test ./...
 # Registry round-trip against real HKCU (writes + cleans up; opt-in):
 $env:GUISE_REGISTRY_IT=1; go test ./internal/winreg/ -run RoundTrip
 ```
+
+## License
+
+[MIT](LICENSE) © Joshua Shanks
