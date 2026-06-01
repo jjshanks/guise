@@ -1,4 +1,4 @@
-# urlrouter
+# guise
 
 A Windows 11 app that registers as the default web browser and routes each
 clicked URL to a specific Chrome profile by regex rule. One binary, three
@@ -8,7 +8,7 @@ design.
 ## How it works
 
 When you click a link anywhere in Windows, the shell hands the URL to
-`urlrouter.exe`. It matches the URL against an ordered list of regex rules and
+`guise.exe`. It matches the URL against an ordered list of regex rules and
 launches Chrome with the profile bound to the **first matching rule**. If
 nothing matches, it launches Chrome with no `--profile-directory` flag, letting
 Chrome do its normal thing.
@@ -21,10 +21,10 @@ chrome.exe --profile-directory="Profile 3" https://github.com/foo
 
 | Invocation | Mode | Does |
 |---|---|---|
-| `urlrouter.exe <url>` | ROUTE | match, launch Chrome, exit (this is what Windows runs per click) |
-| `urlrouter.exe --tray` | TRAY | tray icon + rule editor (autostart this at login) |
-| `urlrouter.exe --register` | SETUP | write HKCU registry entries so the app is an eligible browser |
-| `urlrouter.exe --unregister` | SETUP | remove those entries |
+| `guise.exe <url>` | ROUTE | match, launch Chrome, exit (this is what Windows runs per click) |
+| `guise.exe --tray` | TRAY | tray icon + rule editor (autostart this at login) |
+| `guise.exe --register` | SETUP | write HKCU registry entries so the app is an eligible browser |
+| `guise.exe --unregister` | SETUP | remove those entries |
 
 Every mode writes only to `HKEY_CURRENT_USER`, so nothing ever needs admin
 rights — no UAC, no elevation.
@@ -35,7 +35,7 @@ Requires Go 1.22+ on Windows (amd64).
 
 ```powershell
 go generate ./...   # regenerate rsrc_windows_amd64.syso from the manifest + icon (optional; committed)
-go build -ldflags "-H windowsgui" -o urlrouter.exe .
+go build -ldflags "-H windowsgui" -o guise.exe .
 ```
 
 `-H windowsgui` is essential — without it every link click flashes a console
@@ -45,16 +45,16 @@ window. `go generate` needs `rsrc` on PATH: `go install github.com/akavel/rsrc@l
 
 No installer or admin rights needed:
 
-1. Copy `urlrouter.exe` to `%LOCALAPPDATA%\Programs\URLRouter\`.
-2. Run `urlrouter.exe --register` once.
-3. Run `urlrouter.exe --tray` and toggle **Start at login** in the tray menu.
+1. Copy `guise.exe` to `%LOCALAPPDATA%\Programs\Guise\`.
+2. Run `guise.exe --register` once.
+3. Run `guise.exe --tray` and toggle **Start at login** in the tray menu.
 4. Windows 11 forbids silent default-browser changes, so set the default
-   yourself: **Settings → Apps → Default apps → URL Router → Set default**
+   yourself: **Settings → Apps → Default apps → Guise → Set default**
    (the tray's "Default browser: No — click to fix" item deep-links there).
 
 ## Rules
 
-Rules live in `%APPDATA%\URLRouter\config.json` and are edited from the tray
+Rules live in `%APPDATA%\Guise\config.json` and are edited from the tray
 ("Edit rules…"). Order **is** evaluation order: first match wins.
 
 ```json
@@ -80,7 +80,7 @@ Rules live in `%APPDATA%\URLRouter\config.json` and are edited from the tray
 
 ## Diagnostics
 
-`%APPDATA%\URLRouter\urlrouter.log` records one line per click: input URL, the
+`%APPDATA%\Guise\guise.log` records one line per click: input URL, the
 rule that won (or "default"), the resolved profile, and the launch result. When
 a link opens in the "wrong" profile, the log shows exactly which rule won.
 
@@ -105,5 +105,5 @@ internal/assets            embedded tray icon
 ```powershell
 go test ./...
 # Registry round-trip against real HKCU (writes + cleans up; opt-in):
-$env:URLROUTER_REGISTRY_IT=1; go test ./internal/winreg/ -run RoundTrip
+$env:GUISE_REGISTRY_IT=1; go test ./internal/winreg/ -run RoundTrip
 ```

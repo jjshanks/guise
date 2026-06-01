@@ -1,4 +1,4 @@
-// Package config defines the urlrouter on-disk configuration (§5) and the
+// Package config defines the guise on-disk configuration (§5) and the
 // routines to load and atomically save it. The schema and matching order here
 // are the behavioral contract the whole app orbits around.
 package config
@@ -31,9 +31,9 @@ type Config struct {
 // SchemaVersion is the current config schema version.
 const SchemaVersion = 1
 
-// Dir returns the configuration directory, %APPDATA%\URLRouter (§5.1).
+// Dir returns the configuration directory, %APPDATA%\Guise (§5.1).
 func Dir() string {
-	return filepath.Join(os.Getenv("APPDATA"), "URLRouter")
+	return filepath.Join(os.Getenv("APPDATA"), "Guise")
 }
 
 // Path returns the full path to config.json.

@@ -1,8 +1,8 @@
-# URL Router — Technical Specification
+# Guise — Technical Specification
 
 A Windows 11 application, written in Go, that registers itself as the default web browser, maps incoming URLs to Chrome profiles via regex rules, and exposes a system-tray UI for editing those rules.
 
-**Working name:** `urlrouter` (binary: `urlrouter.exe`)
+**Working name:** `guise` (binary: `guise.exe`)
 
 ---
 
@@ -26,13 +26,13 @@ Patterns are **unanchored** (see §5.3) — `github\.com/foo` matches anywhere i
 
 ## 2. Architecture: one binary, three modes
 
-The single `urlrouter.exe` behaves differently based on how it's invoked. This is the crucial design decision — Windows invokes the *same* registered executable every time a link is clicked, so each invocation must be self-contained and self-routing.
+The single `guise.exe` behaves differently based on how it's invoked. This is the crucial design decision — Windows invokes the *same* registered executable every time a link is clicked, so each invocation must be self-contained and self-routing.
 
 ```
-urlrouter.exe <url>          → ROUTE mode  (short-lived: match, launch Chrome, exit)
-urlrouter.exe --tray         → TRAY mode   (long-lived: tray icon + config editor)
-urlrouter.exe --register     → SETUP mode  (write HKCU registry entries, then exit)
-urlrouter.exe --unregister   → SETUP mode  (remove registry entries, then exit)
+guise.exe <url>          → ROUTE mode  (short-lived: match, launch Chrome, exit)
+guise.exe --tray         → TRAY mode   (long-lived: tray icon + config editor)
+guise.exe --register     → SETUP mode  (write HKCU registry entries, then exit)
+guise.exe --unregister   → SETUP mode  (remove registry entries, then exit)
 ```
 
 All registry writes target `HKEY_CURRENT_USER` (see §3), so **no mode ever needs administrator rights** — there is no elevation, no UAC prompt, no separate admin process. Setup runs as the normal user.
@@ -42,7 +42,7 @@ All registry writes target `HKEY_CURRENT_USER` (see §3), so **no mode ever need
    user clicks a link   │  Windows shell            │
    ───────────────────► │  default-browser dispatch │
                         └─────────────┬────────────┘
-                                      │ urlrouter.exe "https://github.com/foo"
+                                      │ guise.exe "https://github.com/foo"
                                       ▼
                         ┌──────────────────────────┐
                         │  ROUTE mode               │
@@ -82,26 +82,26 @@ Windows 11 discovers browsers through **registered application capabilities**. Y
 Because this is a single-user personal tool, **every key lives under `HKEY_CURRENT_USER`** — Windows fully supports per-user browser registration there, and writing to HKCU needs no elevation. The mirror of the system-wide locations under HKCU is:
 
 ```
-HKCU\SOFTWARE\Clients\StartMenuInternet\URLRouter
-  (Default)                         = "URL Router"
+HKCU\SOFTWARE\Clients\StartMenuInternet\Guise
+  (Default)                         = "Guise"
   \DefaultIcon
-    (Default)                       = "C:\Path\urlrouter.exe,0"
+    (Default)                       = "C:\Path\guise.exe,0"
   \Capabilities
-    ApplicationName                 = "URL Router"
+    ApplicationName                 = "Guise"
     ApplicationDescription          = "Routes URLs to Chrome profiles by regex"
     \URLAssociations
-      http                          = "URLRouterHTML"
-      https                         = "URLRouterHTML"
+      http                          = "GuiseHTML"
+      https                         = "GuiseHTML"
   \shell\open\command
-    (Default)                       = "\"C:\Path\urlrouter.exe\" \"%1\""
+    (Default)                       = "\"C:\Path\guise.exe\" \"%1\""
 
 HKCU\SOFTWARE\RegisteredApplications
-  URLRouter = "SOFTWARE\Clients\StartMenuInternet\URLRouter\Capabilities"
+  Guise = "SOFTWARE\Clients\StartMenuInternet\Guise\Capabilities"
 
-HKCU\SOFTWARE\Classes\URLRouterHTML  (ProgID — the actual handler)
-  (Default)                         = "URL Router Document"
+HKCU\SOFTWARE\Classes\GuiseHTML  (ProgID — the actual handler)
+  (Default)                         = "Guise Document"
   \shell\open\command
-    (Default)                       = "\"C:\Path\urlrouter.exe\" \"%1\""
+    (Default)                       = "\"C:\Path\guise.exe\" \"%1\""
 ```
 
 Note `HKCU\SOFTWARE\Classes` is the per-user equivalent of `HKEY_CLASSES_ROOT` (the OS merges them at runtime), so the ProgID registers there. No HKLM, no HKCR, no admin.
@@ -110,20 +110,20 @@ Key detail: **`%1` is the URL.** Windows substitutes the clicked URL into the co
 
 ### 3.2 Default protocol handler ProgID
 
-The `URLAssociations` map points `http`/`https` at a ProgID (`URLRouterHTML`). The ProgID's `shell\open\command` is what actually runs. Both must agree on the path to the exe.
+The `URLAssociations` map points `http`/`https` at a ProgID (`GuiseHTML`). The ProgID's `shell\open\command` is what actually runs. Both must agree on the path to the exe.
 
 ### 3.3 The Windows 11 limitation you must design around
 
 Since Windows 10 1803 / Windows 11, apps **cannot** silently set themselves as the default handler — Microsoft moved this behind a user gesture to stop hijacking. Your `--register` step makes the app *eligible*; the user then has to:
 
-- Open **Settings → Apps → Default apps → URL Router → Set default**, or
-- Click a link, and Windows shows a "How do you want to open this?" picker where URL Router now appears.
+- Open **Settings → Apps → Default apps → Guise → Set default**, or
+- Click a link, and Windows shows a "How do you want to open this?" picker where Guise now appears.
 
 **Spec requirement:** after `--register`, the tray app should detect it is not yet the default and surface a one-click **"Open Default Apps settings"** button that deep-links to `ms-settings:defaultapps`. Detect current default by reading:
 
 ```
 HKCU\SOFTWARE\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice
-  ProgId = <should be "URLRouterHTML" when we are default>
+  ProgId = <should be "GuiseHTML" when we are default>
 ```
 
 (The `UserChoice\Hash` value is intentionally tamper-protected by Windows; do **not** attempt to forge it. Read `ProgId` only to *detect* state, never to *set* it.)
@@ -180,7 +180,7 @@ Resolution order (first found wins):
 ### 5.1 Location
 
 ```
-%APPDATA%\URLRouter\config.json
+%APPDATA%\Guise\config.json
 ```
 
 `%APPDATA%` (roaming) so it follows the user; no elevation needed to write it.
@@ -237,7 +237,7 @@ Locked-in decisions:
 ### 6.1 Tray menu (right-click)
 
 ```
-URL Router
+Guise
 ─────────────────
 ✓ Default browser: Yes        (or "No — click to fix")
 Edit rules…
@@ -251,7 +251,7 @@ Quit
 
 - **Default browser status** — live indicator from §3.3 detection. If "No", clicking opens `ms-settings:defaultapps`.
 - **Edit rules…** — opens the editor window (§6.2).
-- **Open config folder** — opens `%APPDATA%\URLRouter\` in Explorer for manual edits or log inspection.
+- **Open config folder** — opens `%APPDATA%\Guise\` in Explorer for manual edits or log inspection.
 - **Test a URL…** — input box; shows which rule would match (or "no match → Chrome default") and which profile would launch, *without* launching. Critical for debugging unanchored patterns without clicking real links.
 - **Start at login** — toggles the autostart registry value (§7).
 
@@ -285,7 +285,7 @@ Toggle a value under:
 
 ```
 HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
-  URLRouter = "\"C:\Path\urlrouter.exe\" --tray"
+  Guise = "\"C:\Path\guise.exe\" --tray"
 ```
 
 HKCU = no elevation. Only the **tray** autostarts; routing needs nothing resident.
@@ -294,18 +294,18 @@ HKCU = no elevation. Only the **tray** autostarts; routing needs nothing residen
 
 ## 8. Build & packaging
 
-- **Module:** `module urlrouter`, Go 1.22+.
-- **Build:** `GOOS=windows GOARCH=amd64 go build -ldflags "-H windowsgui" -o urlrouter.exe`
+- **Module:** `module guise`, Go 1.22+.
+- **Build:** `GOOS=windows GOARCH=amd64 go build -ldflags "-H windowsgui" -o guise.exe`
   - `-H windowsgui` suppresses the console window — essential, or every link click flashes a black box. This is the single most important build detail.
 - **Manifest:** embed an application manifest requesting `asInvoker` (run as the normal user — never elevate, since all registry writes are HKCU). Mark the app per-monitor-DPI-aware here too (§10). Bundle the manifest and tray icon via a `.syso` (`github.com/akavel/rsrc`) or `go:embed`.
 - **Icon:** embed a `.ico`; reference it in `DefaultIcon` and the tray.
-- **Install:** because nothing needs elevation, install can be trivial — drop `urlrouter.exe` in `%LOCALAPPDATA%\Programs\URLRouter\` and run `urlrouter.exe --register`, all as the normal user. An Inno Setup script is nice-to-have for the copy + register + autostart steps, but a plain "copy the exe, run `--register` once" is sufficient. No MSI, no UAC, no admin install required.
+- **Install:** because nothing needs elevation, install can be trivial — drop `guise.exe` in `%LOCALAPPDATA%\Programs\Guise\` and run `guise.exe --register`, all as the normal user. An Inno Setup script is nice-to-have for the copy + register + autostart steps, but a plain "copy the exe, run `--register` once" is sufficient. No MSI, no UAC, no admin install required.
 
 ---
 
 ## 9. Logging & diagnostics
 
-- Log file: `%APPDATA%\URLRouter\urlrouter.log` (rotated, small).
+- Log file: `%APPDATA%\Guise\guise.log` (rotated, small).
 - ROUTE mode logs: timestamp, input URL, matched rule id (or "default"), resolved profile, chrome path, launch result. One line per click.
 - This log is the primary debugging surface — when a link opens in the "wrong" profile, the log shows exactly which rule won.
 
@@ -328,7 +328,7 @@ HKCU = no elevation. Only the **tray** autostarts; routing needs nothing residen
 
 ## 11. Milestones (suggested build order)
 
-1. **ROUTE core** — hardcode one rule, prove `urlrouter.exe <url>` launches the right Chrome profile. (Validates the whole premise fastest.)
+1. **ROUTE core** — hardcode one rule, prove `guise.exe <url>` launches the right Chrome profile. (Validates the whole premise fastest.)
 2. **Config loader + matcher** — JSON + ordered unanchored RE2 matching + no-match-means-no-flag fallback + a "test URL" function (no GUI).
 3. **Registration** — `--register`/`--unregister`, default-state detection, deep-link to settings.
 4. **Tray** — icon, menu, default-browser status indicator, test-a-URL dialog.

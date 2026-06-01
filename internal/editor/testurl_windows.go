@@ -6,9 +6,9 @@ import (
 	"github.com/lxn/walk"
 	d "github.com/lxn/walk/declarative"
 
-	"urlrouter/internal/chrome"
-	"urlrouter/internal/config"
-	"urlrouter/internal/router"
+	"guise/internal/chrome"
+	"guise/internal/config"
+	"guise/internal/router"
 )
 
 // ShowTest opens the lightweight "Test a URL" dialog from the tray (§6.1): type
@@ -39,7 +39,7 @@ func ShowTest() error {
 
 	_, err := d.MainWindow{
 		AssignTo: &mw,
-		Title:    "URL Router — Test a URL",
+		Title:    "Guise — Test a URL",
 		MinSize:  d.Size{Width: 480, Height: 140},
 		Layout:   d.VBox{},
 		Children: []d.Widget{

@@ -15,9 +15,9 @@ import (
 	"github.com/lxn/walk"
 	d "github.com/lxn/walk/declarative"
 
-	"urlrouter/internal/chrome"
-	"urlrouter/internal/config"
-	"urlrouter/internal/router"
+	"guise/internal/chrome"
+	"guise/internal/config"
+	"guise/internal/router"
 )
 
 // rulesModel adapts the rule slice to a walk TableView.
@@ -90,7 +90,7 @@ func Show() error {
 func (w *window) build() error {
 	err := d.MainWindow{
 		AssignTo: &w.mw,
-		Title:    "URL Router — Edit Rules",
+		Title:    "Guise — Edit Rules",
 		MinSize:  d.Size{Width: 720, Height: 480},
 		Size:     d.Size{Width: 820, Height: 560},
 		Layout:   d.VBox{},

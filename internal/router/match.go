@@ -6,7 +6,7 @@ import (
 	"log"
 	"regexp"
 
-	"urlrouter/internal/config"
+	"guise/internal/config"
 )
 
 // Result describes the outcome of matching a URL against the rules.

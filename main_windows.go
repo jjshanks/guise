@@ -1,29 +1,29 @@
 //go:build windows
 
-// Command urlrouter is a single Windows binary with three modes (§2), selected
+// Command guise is a single Windows binary with three modes (§2), selected
 // by how it is invoked:
 //
-//	urlrouter.exe <url>         ROUTE mode  — match, launch Chrome, exit.
-//	urlrouter.exe --tray        TRAY mode   — tray icon + rule editor.
-//	urlrouter.exe --register    SETUP mode  — write HKCU registry entries.
-//	urlrouter.exe --unregister  SETUP mode  — remove them.
+//	guise.exe <url>         ROUTE mode  — match, launch Chrome, exit.
+//	guise.exe --tray        TRAY mode   — tray icon + rule editor.
+//	guise.exe --register    SETUP mode  — write HKCU registry entries.
+//	guise.exe --unregister  SETUP mode  — remove them.
 //
 // Every invocation is self-contained and self-routing: Windows runs this same
 // exe for each clicked link, so ROUTE mode re-reads config from disk each time.
 package main
 
 // Regenerate the embedded manifest + icon resource (run `go generate`):
-//go:generate rsrc -manifest urlrouter.manifest -ico icon.ico -arch amd64 -o rsrc_windows_amd64.syso
+//go:generate rsrc -manifest guise.manifest -ico icon.ico -arch amd64 -o rsrc_windows_amd64.syso
 
 import (
 	"log"
 	"os"
 
-	"urlrouter/internal/applog"
-	"urlrouter/internal/notify"
-	"urlrouter/internal/router"
-	"urlrouter/internal/tray"
-	"urlrouter/internal/winreg"
+	"guise/internal/applog"
+	"guise/internal/notify"
+	"guise/internal/router"
+	"guise/internal/tray"
+	"guise/internal/winreg"
 )
 
 func main() {
@@ -58,29 +58,29 @@ func main() {
 func register(exe string) {
 	if err := winreg.Register(exe); err != nil {
 		log.Printf("register: %v", err)
-		notify.Error("URL Router", "Registration failed:\n"+err.Error())
+		notify.Error("Guise", "Registration failed:\n"+err.Error())
 		os.Exit(1)
 	}
 	log.Printf("registered exe=%q", exe)
 
-	msg := "URL Router is now registered as an available browser.\n\n"
+	msg := "Guise is now registered as an available browser.\n\n"
 	if isDef, _ := winreg.IsDefault(); isDef {
 		msg += "It is already your default browser."
 	} else {
 		// Windows 11 forbids silent default changes (§3.3); guide the user.
-		msg += "To finish, set it as your default in:\nSettings → Apps → Default apps → URL Router → Set default."
+		msg += "To finish, set it as your default in:\nSettings → Apps → Default apps → Guise → Set default."
 	}
-	notify.Info("URL Router", msg)
+	notify.Info("Guise", msg)
 }
 
 func unregister() {
 	if err := winreg.Unregister(); err != nil {
 		log.Printf("unregister: %v", err)
-		notify.Error("URL Router", "Unregister failed:\n"+err.Error())
+		notify.Error("Guise", "Unregister failed:\n"+err.Error())
 		os.Exit(1)
 	}
 	log.Printf("unregistered")
-	notify.Info("URL Router", "URL Router has been unregistered.")
+	notify.Info("Guise", "Guise has been unregistered.")
 }
 
 // exitOnErr leaves a non-zero exit code on routing failure for scripted use,

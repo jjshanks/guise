@@ -1,4 +1,4 @@
-module urlrouter
+module guise
 
 go 1.26.3
 

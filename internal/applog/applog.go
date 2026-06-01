@@ -1,4 +1,4 @@
-// Package applog wires the standard logger to urlrouter.log (§9). The log is
+// Package applog wires the standard logger to guise.log (§9). The log is
 // the primary debugging surface: when a link opens in the "wrong" profile, the
 // log shows exactly which rule won.
 package applog
@@ -9,20 +9,20 @@ import (
 	"os"
 	"path/filepath"
 
-	"urlrouter/internal/config"
+	"guise/internal/config"
 )
 
 // maxLogSize keeps the log small (§9): once it exceeds this, the current file
-// is rotated to urlrouter.log.1 (overwriting any previous one) and a fresh
+// is rotated to guise.log.1 (overwriting any previous one) and a fresh
 // file starts.
 const maxLogSize = 512 * 1024
 
-// Path returns the full path to urlrouter.log.
+// Path returns the full path to guise.log.
 func Path() string {
-	return filepath.Join(config.Dir(), "urlrouter.log")
+	return filepath.Join(config.Dir(), "guise.log")
 }
 
-// Setup points the standard logger at urlrouter.log, creating the directory
+// Setup points the standard logger at guise.log, creating the directory
 // and rotating an oversized log first. It returns the open file so the caller
 // can close it on exit. On failure it leaves logging at its default (stderr)
 // and returns the error — logging problems must never be fatal.

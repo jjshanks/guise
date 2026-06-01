@@ -10,13 +10,13 @@ import (
 )
 
 // TestRegisterRoundTrip exercises the full HKCU key layout against the real
-// registry. It is gated behind URLROUTER_REGISTRY_IT=1 so a normal `go test`
+// registry. It is gated behind GUISE_REGISTRY_IT=1 so a normal `go test`
 // never mutates browser-registration keys; run it explicitly to verify setup.
 func TestRegisterRoundTrip(t *testing.T) {
-	if os.Getenv("URLROUTER_REGISTRY_IT") != "1" {
-		t.Skip("set URLROUTER_REGISTRY_IT=1 to run the registry integration test")
+	if os.Getenv("GUISE_REGISTRY_IT") != "1" {
+		t.Skip("set GUISE_REGISTRY_IT=1 to run the registry integration test")
 	}
-	const fakeExe = `C:\Test\urlrouter.exe`
+	const fakeExe = `C:\Test\guise.exe`
 	t.Cleanup(func() { Unregister() })
 
 	if err := Register(fakeExe); err != nil {

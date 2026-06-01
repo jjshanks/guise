@@ -14,11 +14,11 @@ import (
 
 	"github.com/getlantern/systray"
 
-	"urlrouter/internal/assets"
-	"urlrouter/internal/config"
-	"urlrouter/internal/editor"
-	"urlrouter/internal/winreg"
-	"urlrouter/internal/winutil"
+	"guise/internal/assets"
+	"guise/internal/config"
+	"guise/internal/editor"
+	"guise/internal/winreg"
+	"guise/internal/winutil"
 )
 
 // guiBusy serializes walk windows onto a single dedicated GUI thread: walk
@@ -59,20 +59,20 @@ func postGUI(fn func()) {
 
 func onReady(exe string) {
 	systray.SetIcon(assets.Icon)
-	systray.SetTitle("URL Router")
-	systray.SetTooltip("URL Router — route URLs to Chrome profiles")
+	systray.SetTitle("Guise")
+	systray.SetTooltip("Guise — route URLs to Chrome profiles")
 
-	mTitle := systray.AddMenuItem("URL Router", "")
+	mTitle := systray.AddMenuItem("Guise", "")
 	mTitle.Disable()
 	systray.AddSeparator()
 	mDefault := systray.AddMenuItem("Default browser: …", "Click to open Default Apps settings")
 	mEdit := systray.AddMenuItem("Edit rules…", "Open the rule editor")
-	mFolder := systray.AddMenuItem("Open config folder", "Open %APPDATA%\\URLRouter in Explorer")
+	mFolder := systray.AddMenuItem("Open config folder", "Open %APPDATA%\\Guise in Explorer")
 	systray.AddSeparator()
 	mTest := systray.AddMenuItem("Test a URL…", "See which rule would match a URL")
 	systray.AddSeparator()
 	mAutostart := systray.AddMenuItemCheckbox("Start at login", "Launch the tray when you sign in", false)
-	mQuit := systray.AddMenuItem("Quit", "Exit URL Router")
+	mQuit := systray.AddMenuItem("Quit", "Exit Guise")
 
 	if on, err := winreg.IsAutostart(); err == nil && on {
 		mAutostart.Check()

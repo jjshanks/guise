@@ -5,9 +5,9 @@ import (
 	"log"
 	"os/exec"
 
-	"urlrouter/internal/chrome"
-	"urlrouter/internal/config"
-	"urlrouter/internal/notify"
+	"guise/internal/chrome"
+	"guise/internal/config"
+	"guise/internal/notify"
 )
 
 // Route is the heart of ROUTE mode (§12): load config, match the URL against
@@ -46,14 +46,14 @@ func Route(url string) error {
 	chromePath, err := chrome.ResolvePath(cfg.ChromePath)
 	if err != nil {
 		log.Printf("cannot resolve chrome.exe: %v", err)
-		notify.Error("URL Router", "Could not find chrome.exe.\n\nSet chrome_path in the config or install Chrome.")
+		notify.Error("Guise", "Could not find chrome.exe.\n\nSet chrome_path in the config or install Chrome.")
 		return fmt.Errorf("resolving chrome: %w", err)
 	}
 
 	args := launchArgs(profileDir, url)
 	if err := exec.Command(chromePath, args...).Start(); err != nil {
 		log.Printf("launch failed chrome=%q args=%v: %v", chromePath, args, err)
-		notify.Error("URL Router", "Failed to launch Chrome:\n"+err.Error())
+		notify.Error("Guise", "Failed to launch Chrome:\n"+err.Error())
 		return fmt.Errorf("launching chrome: %w", err)
 	}
 	log.Printf("launched chrome=%q profile=%q url=%q", chromePath, profileDir, url)

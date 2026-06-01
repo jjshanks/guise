@@ -9,8 +9,8 @@ import (
 )
 
 func TestCommandQuoting(t *testing.T) {
-	got := command(`C:\Program Files\URLRouter\urlrouter.exe`)
-	want := `"C:\Program Files\URLRouter\urlrouter.exe" "%1"`
+	got := command(`C:\Program Files\Guise\guise.exe`)
+	want := `"C:\Program Files\Guise\guise.exe" "%1"`
 	if got != want {
 		t.Errorf("command = %q, want %q", got, want)
 	}
@@ -19,7 +19,7 @@ func TestCommandQuoting(t *testing.T) {
 // TestSetAndDeleteValue exercises the registry plumbing against a throwaway key
 // so it never disturbs the real browser-registration or autostart entries.
 func TestSetAndDeleteValue(t *testing.T) {
-	const testKey = `SOFTWARE\URLRouterSelfTest`
+	const testKey = `SOFTWARE\GuiseSelfTest`
 	t.Cleanup(func() { registry.DeleteKey(registry.CURRENT_USER, testKey) })
 
 	if err := setString(testKey, "val", "hello"); err != nil {

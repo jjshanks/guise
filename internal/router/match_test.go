@@ -3,7 +3,7 @@ package router
 import (
 	"testing"
 
-	"urlrouter/internal/config"
+	"guise/internal/config"
 )
 
 func cfg(rules ...config.Rule) *config.Config {

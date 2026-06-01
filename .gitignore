@@ -1,5 +1,5 @@
 # Build output
-/urlrouter.exe
+/guise.exe
 
 # The resource .syso IS committed so `go build` is turnkey (it carries the
 # manifest walk needs at runtime); regenerate it with `go generate`.

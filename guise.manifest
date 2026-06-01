@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-  <assemblyIdentity version="1.0.0.0" processorArchitecture="*" name="URLRouter" type="win32"/>
+  <assemblyIdentity version="1.0.0.0" processorArchitecture="*" name="Guise" type="win32"/>
   <description>Routes URLs to Chrome profiles by regex</description>
 
   <!-- Common Controls v6: required by walk for native-looking widgets (§6.3). -->

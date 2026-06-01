@@ -1,6 +1,6 @@
 //go:build windows
 
-// Package winreg performs the HKCU-only registry work that makes urlrouter
+// Package winreg performs the HKCU-only registry work that makes guise
 // eligible as the default browser (§3), detects whether it currently is the
 // default (§3.3), and toggles login autostart (§7). Every write targets
 // HKEY_CURRENT_USER, so no operation here ever needs administrator rights.
@@ -15,12 +15,12 @@ import (
 
 // Identifiers shared across the registry layout (§3.1).
 const (
-	AppName        = "URL Router"
+	AppName        = "Guise"
 	AppDescription = "Routes URLs to Chrome profiles by regex"
-	progID         = "URLRouterHTML"
-	regAppKey      = "URLRouter" // Key name under RegisteredApplications and Run.
+	progID         = "GuiseHTML"
+	regAppKey      = "Guise" // Key name under RegisteredApplications and Run.
 
-	clientKey         = `SOFTWARE\Clients\StartMenuInternet\URLRouter`
+	clientKey         = `SOFTWARE\Clients\StartMenuInternet\Guise`
 	capabilitiesKey   = clientKey + `\Capabilities`
 	registeredAppsKey = `SOFTWARE\RegisteredApplications`
 	classesProgIDKey  = `SOFTWARE\Classes\` + progID
@@ -34,7 +34,7 @@ func command(exe string) string {
 	return `"` + exe + `" "%1"`
 }
 
-// Register writes all HKCU keys that make urlrouter eligible as a default
+// Register writes all HKCU keys that make guise eligible as a default
 // browser (§3.1). It is idempotent: re-running overwrites the same values,
 // which is also how you update the recorded exe path after moving the binary.
 func Register(exe string) error {
@@ -51,7 +51,7 @@ func Register(exe string) error {
 		{capabilitiesKey + `\URLAssociations`, "https", progID},
 		{clientKey + `\shell\open\command`, "", command(exe)},
 		{registeredAppsKey, regAppKey, capabilitiesKey},
-		{classesProgIDKey, "", "URL Router Document"},
+		{classesProgIDKey, "", "Guise Document"},
 		{classesProgIDKey + `\shell\open\command`, "", command(exe)},
 	}
 	for _, w := range writes {
@@ -90,7 +90,7 @@ func Unregister() error {
 	return nil
 }
 
-// IsDefault reports whether urlrouter is the current https handler, by reading
+// IsDefault reports whether guise is the current https handler, by reading
 // the UserChoice ProgId (§3.3). We only ever read this value to detect state;
 // the tamper-protected Hash means it can never be written here to force the
 // default. A missing key simply means we are not the default.
