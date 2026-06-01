@@ -82,7 +82,9 @@ func onReady(exe string) {
 	mTitle := systray.AddMenuItem("Guise "+version.Short(), version.String())
 	mTitle.Disable()
 	systray.AddSeparator()
-	mDefault := systray.AddMenuItem("Default browser: …", "Click to open Default Apps settings")
+	// A checkbox (not a plain item) so its check renders in the same left
+	// gutter as the toggles below, keeping all checkmarks aligned (§6.1).
+	mDefault := systray.AddMenuItemCheckbox("Default browser: …", "Click to open Default Apps settings", false)
 	mEdit := systray.AddMenuItem("Edit rules…", "Open the rule editor")
 	mFolder := systray.AddMenuItem("Open config folder", "Open %APPDATA%\\Guise in Explorer")
 	systray.AddSeparator()
@@ -193,10 +195,13 @@ func onReady(exe string) {
 		switch isDef, err := winreg.IsDefault(); {
 		case err != nil:
 			mDefault.SetTitle("Default browser: unknown")
+			mDefault.Uncheck()
 		case isDef:
-			mDefault.SetTitle("✓ Default browser: Yes")
+			mDefault.SetTitle("Default browser: Yes")
+			mDefault.Check()
 		default:
 			mDefault.SetTitle("Default browser: No — click to fix")
+			mDefault.Uncheck()
 		}
 	}
 	refreshDefault()
