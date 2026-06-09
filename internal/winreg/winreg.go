@@ -121,9 +121,14 @@ func SetAutostart(enabled bool, exe string) error {
 	return setString(runKey, regAppKey, `"`+exe+`" --tray`)
 }
 
-// IsAutostart reports whether the autostart Run value is present.
+// IsAutostart reports whether the autostart Run value is present. A missing
+// Run key (unusual, but possible) simply means autostart is off, mirroring
+// IsDefault's treatment of a missing UserChoice key.
 func IsAutostart() (bool, error) {
 	k, err := registry.OpenKey(registry.CURRENT_USER, runKey, registry.QUERY_VALUE)
+	if errors.Is(err, registry.ErrNotExist) {
+		return false, nil
+	}
 	if err != nil {
 		return false, fmt.Errorf("opening Run key: %w", err)
 	}

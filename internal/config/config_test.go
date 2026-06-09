@@ -3,7 +3,7 @@ package config
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -67,8 +67,8 @@ func TestSaveLoadRoundTripAtomic(t *testing.T) {
 	// No temp files left behind after an atomic save.
 	entries, _ := os.ReadDir(Dir())
 	for _, e := range entries {
-		if filepath.Ext(e.Name()) == ".tmp" || filepath.Base(e.Name()) != "config.json" {
-			t.Errorf("leftover file after save: %s", e.Name())
+		if strings.HasSuffix(e.Name(), ".tmp") {
+			t.Errorf("leftover temp file after save: %s", e.Name())
 		}
 	}
 

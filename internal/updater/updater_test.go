@@ -1,6 +1,7 @@
 package updater
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -188,6 +189,68 @@ func TestDownloadRejectsCorruptAsset(t *testing.T) {
 	}
 }
 
+func TestDownloadRejectsOversizedAsset(t *testing.T) {
+	// The server streams more bytes than the release metadata declares for the
+	// asset; the download must stop at the cap and fail, leaving nothing behind.
+	payload := bytes.Repeat([]byte("A"), 64)
+	sum := sha256.Sum256(payload)
+	hexSum := hex.EncodeToString(sum[:])
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/guise.exe", func(w http.ResponseWriter, r *http.Request) { w.Write(payload) })
+	mux.HandleFunc("/guise.exe.sha256", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(hexSum + "  guise.exe\n"))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rel := &Release{
+		TagName: "v2.0.0",
+		Assets: []Asset{
+			{Name: "guise.exe", URL: srv.URL + "/guise.exe", Size: 8},
+			{Name: "guise.exe.sha256", URL: srv.URL + "/guise.exe.sha256"},
+		},
+	}
+	c := &Client{HTTP: srv.Client()}
+	dir := t.TempDir()
+
+	if _, err := c.Download(context.Background(), rel, dir); err == nil {
+		t.Fatal("expected error for asset larger than its declared size, got nil")
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 0 {
+		t.Errorf("download dir not clean after rejection: %v", entries)
+	}
+}
+
+func TestDownloadRejectsDisallowedHost(t *testing.T) {
+	// NewClient installs the GitHub host allowlist; an asset URL pointing
+	// elsewhere must be rejected before any request is made.
+	rel := &Release{
+		TagName: "v2.0.0",
+		Assets: []Asset{
+			{Name: "guise.exe", URL: "https://evil.example/guise.exe"},
+			{Name: "guise.exe.sha256", URL: "https://evil.example/guise.exe.sha256"},
+		},
+	}
+	if _, err := NewClient().Download(context.Background(), rel, t.TempDir()); err == nil {
+		t.Error("expected error for a non-GitHub asset host, got nil")
+	}
+}
+
+func TestCheckGitHubHost(t *testing.T) {
+	for _, ok := range []string{"github.com", "api.github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"} {
+		if err := checkGitHubHost(ok); err != nil {
+			t.Errorf("checkGitHubHost(%q) = %v, want nil", ok, err)
+		}
+	}
+	for _, bad := range []string{"evil.example", "github.com.evil.example", "xgithubusercontent.com", "githubusercontent.com", "notgithub.com", ""} {
+		if err := checkGitHubHost(bad); err == nil {
+			t.Errorf("checkGitHubHost(%q) = nil, want error", bad)
+		}
+	}
+}
+
 func TestDownloadMissingAsset(t *testing.T) {
 	rel := &Release{TagName: "v2.0.0"} // no assets
 	c := NewClient()
@@ -199,5 +262,8 @@ func TestDownloadMissingAsset(t *testing.T) {
 func TestOldPath(t *testing.T) {
 	if got := oldPath("/x/guise.exe"); got != "/x/guise.exe.old" {
 		t.Errorf("oldPath = %q", got)
+	}
+	if got := newPath("/x/guise.exe"); got != "/x/guise.exe.new" {
+		t.Errorf("newPath = %q", got)
 	}
 }

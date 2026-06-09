@@ -141,12 +141,11 @@ func onReady(exe string) {
 
 	// installPending applies the downloaded update and relaunches, replacing this
 	// instance (§14.3). It no-ops if nothing is pending and notifies on failure;
-	// on success it shuts this tray down (via quit) so only the new one remains.
-	// Callers do their own confirm first — this performs the swap unconditionally.
-	// It returns true only when the swap succeeded and shutdown is underway, so a
-	// caller running on the event loop can stop the loop without killing the tray
-	// on a failed apply.
-	installPending := func() bool {
+	// on success it shuts this tray down (via quit, which stops the event loop
+	// through done) so only the new one remains. Callers do their own confirm
+	// first — this performs the swap unconditionally — and must not run on the
+	// event loop, since the failure path blocks on a modal.
+	installPending := func() {
 		// Claim the pending update so a concurrent caller (the post-download
 		// prompt and the tray item can both reach here) doesn't apply it twice.
 		updateMu.Lock()
@@ -154,7 +153,7 @@ func onReady(exe string) {
 		pendingPath, pendingVer = "", ""
 		updateMu.Unlock()
 		if path == "" {
-			return false // Nothing downloaded yet, or already claimed.
+			return // Nothing downloaded yet, or already claimed.
 		}
 		if err := updater.Apply(exe, path); err != nil {
 			log.Printf("apply update %s: %v", ver, err)
@@ -165,12 +164,11 @@ func onReady(exe string) {
 				pendingPath, pendingVer = path, ver
 			}
 			updateMu.Unlock()
-			return false
+			return
 		}
 		// The replacement is already starting; shut this instance down.
 		log.Printf("applied update %s; relaunching and quitting", ver)
 		quit()
-		return true
 	}
 
 	// checkForUpdate runs the full check → download → verify flow (§14). It is
@@ -232,6 +230,11 @@ func onReady(exe string) {
 		mInstall.SetTitle("Install update " + rel.TagName)
 		mInstall.Show()
 		log.Printf("update %s downloaded and verified at %s", rel.TagName, path)
+		// The check itself is finished — release the guard before blocking on
+		// the prompt below, so a manual "Check for updates now…" isn't told a
+		// check is still in progress while this dialog sits on screen. (The
+		// deferred Store is then a harmless second write.)
+		checking.Store(false)
 		// Offer to install straight from this prompt. Yes applies and restarts
 		// now; No defers — the "Install update" tray item stays available so the
 		// user can apply it whenever they like (§14.2).
@@ -289,9 +292,15 @@ func onReady(exe string) {
 		}
 	}()
 
+	// Menu event loop. Nothing here may block on a modal dialog — while one is
+	// up, every other item (including Quit) would be dead — so anything that
+	// prompts or reports is dispatched to its own goroutine. The done case ends
+	// the loop when quit() fires from outside it (the install path).
 	go func() {
 		for {
 			select {
+			case <-done:
+				return
 			case <-mDefault.ClickedCh:
 				if isDef, _ := winreg.IsDefault(); !isDef {
 					if err := winutil.ShellOpen("ms-settings:defaultapps"); err != nil {
@@ -318,24 +327,25 @@ func onReady(exe string) {
 				if path == "" {
 					continue // Nothing downloaded yet.
 				}
-				if !notify.Confirm("Guise", "Install update "+ver+" now?\n\nGuise will close and reopen.") {
-					continue
-				}
-				if installPending() {
-					return // Shutting down; otherwise the apply failed — keep running.
-				}
+				// installPending claims the update under updateMu, so a second
+				// click while this confirm is up cannot apply it twice.
+				go func(ver string) {
+					if notify.Confirm("Guise", "Install update "+ver+" now?\n\nGuise will close and reopen.") {
+						installPending()
+					}
+				}(ver)
 			case <-mAutoUpdate.ClickedCh:
 				enable := !mAutoUpdate.Checked()
 				cfg, err := config.Load()
 				if err != nil {
 					log.Printf("load config for auto-update toggle: %v", err)
-					notify.Error("Guise", "Could not read the config to change this setting:\n"+err.Error())
+					go notify.Error("Guise", "Could not read the config to change this setting:\n"+err.Error())
 					continue
 				}
 				cfg.SetAutoUpdate(enable)
 				if err := config.Save(cfg); err != nil {
 					log.Printf("save auto-update=%v: %v", enable, err)
-					notify.Error("Guise", "Could not save this setting:\n"+err.Error())
+					go notify.Error("Guise", "Could not save this setting:\n"+err.Error())
 					continue
 				}
 				if enable {

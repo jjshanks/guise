@@ -49,7 +49,10 @@ func Setup() (*os.File, error) {
 // os.Rename is atomic, so at worst two near-simultaneous clicks each rotate once
 // and the large content still lands in guise.log.1 — and because every log line
 // is emitted as a single O_APPEND write, concurrent writers interleave whole
-// lines but never corrupt one. A cross-process lock would buy nothing here.
+// lines but never corrupt one. One caveat: a process that opened the log just
+// before another's rotate keeps its handle on the renamed file, so its lines
+// land in guise.log.1 instead of the fresh log — they survive, just in the
+// rotated file. A cross-process lock would buy nothing here.
 func rotateIfLarge(path string) {
 	info, err := os.Stat(path)
 	if err != nil || info.Size() < maxLogSize {

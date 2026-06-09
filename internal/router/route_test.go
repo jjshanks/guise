@@ -142,6 +142,24 @@ func TestRouteLaunchFailureReturnsErrorAndNotifies(t *testing.T) {
 	}
 }
 
+func TestRouteUnresolvableChromeNotifiesAndErrors(t *testing.T) {
+	// An unresolvable chrome.exe is the one failure that stops routing (§10):
+	// Route must notify, return an error, and launch nothing.
+	h := newRouteHarness(t)
+	h.chromePath = filepath.Join(t.TempDir(), "missing", "chrome.exe") // never created
+	h.writeConfig(t, `[]`)
+
+	if err := Route("https://example.com"); err == nil {
+		t.Fatal("expected an error when chrome.exe cannot be resolved")
+	}
+	if !h.notified {
+		t.Error("an unresolvable chrome.exe should surface a notification")
+	}
+	if h.launched {
+		t.Error("nothing should launch when chrome.exe cannot be resolved")
+	}
+}
+
 func TestRouteEmptyURLLaunchesBareChrome(t *testing.T) {
 	h := newRouteHarness(t)
 	h.writeConfig(t, `[]`)

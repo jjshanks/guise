@@ -34,8 +34,10 @@ func Route(url string) error {
 	cfg, err := config.Load()
 	if err != nil {
 		// Bad config must never block routing (§10); proceed with the default,
-		// which routes every URL to Chrome's own behavior.
+		// which routes every URL to Chrome's own behavior. Load already returns
+		// the default on error, but don't rely on that contract from here.
 		log.Printf("config error, routing to Chrome default: %v", err)
+		cfg = config.Default()
 	}
 
 	res := Match(cfg, url)

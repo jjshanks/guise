@@ -213,6 +213,9 @@ func (w *window) build() error {
 	// the best size for the title bar. Fail soft — a missing resource just leaves
 	// the Windows default, never breaking the editor.
 	if icon, err := walk.NewIconFromResourceId(2); err == nil {
+		// The icon is caller-owned, not freed with the window; release it once
+		// Run returns (window closed) or each editor session leaks a GDI handle.
+		defer icon.Dispose()
 		w.mw.SetIcon(icon)
 	}
 

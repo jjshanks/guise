@@ -45,8 +45,13 @@ func Apply(curExe, newExe string) error {
 	return nil
 }
 
-// CleanupOld removes the <exe>.old left behind by a previous Apply. It is
-// best-effort: on the very first startup after an update the old image may
-// still be locked by the outgoing process, in which case the next startup
-// clears it.
-func CleanupOld(exe string) { _ = os.Remove(oldPath(exe)) }
+// CleanupOld removes the <exe>.old left behind by a previous Apply, plus any
+// orphaned <exe>.new staged by a download whose Apply failed (pending-update
+// state is in-process only, so a leftover .new is never installable after a
+// restart — the next check re-downloads). It is best-effort: on the very first
+// startup after an update the old image may still be locked by the outgoing
+// process, in which case the next startup clears it.
+func CleanupOld(exe string) {
+	_ = os.Remove(oldPath(exe))
+	_ = os.Remove(newPath(exe))
+}
