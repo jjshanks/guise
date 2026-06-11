@@ -52,7 +52,14 @@ func newRouteHarness(t *testing.T) *routeHarness {
 // given rules array (raw JSON, e.g. `[{"id":"1",...}]`).
 func (h *routeHarness) writeConfig(t *testing.T, rulesJSON string) {
 	t.Helper()
-	body := fmt.Sprintf(`{"version":1,"chrome_path":%q,"rules":%s}`, h.chromePath, rulesJSON)
+	h.writeConfigRaw(t, rulesJSON, "[]")
+}
+
+// writeConfigRaw writes config.json with raw rules and rewrites arrays, so a
+// test can exercise the rewrite pipeline alongside routing.
+func (h *routeHarness) writeConfigRaw(t *testing.T, rulesJSON, rewritesJSON string) {
+	t.Helper()
+	body := fmt.Sprintf(`{"version":1,"chrome_path":%q,"rules":%s,"rewrites":%s}`, h.chromePath, rulesJSON, rewritesJSON)
 	if err := os.MkdirAll(filepath.Dir(config.Path()), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -151,6 +158,61 @@ func TestRouteEmptyURLLaunchesBareChrome(t *testing.T) {
 	}
 	if h.gotArgs != nil {
 		t.Errorf("args = %v, want no args for empty URL", h.gotArgs)
+	}
+}
+
+func TestRoutePreRewriteAffectsProfileAndLaunch(t *testing.T) {
+	// A pre-rewrite (delayed=false) runs before matching, so the rule keyed on the
+	// rewritten host wins and Chrome launches the rewritten URL.
+	h := newRouteHarness(t)
+	h.writeConfigRaw(t,
+		`[{"id":"r","enabled":true,"pattern":"xcancel\\.com","profile_directory":"Profile 1"}]`,
+		`[{"id":"swap","enabled":true,"find":"x.com","replace":"xcancel.com"}]`)
+	h.writeLocalState(t, `{"profile":{"info_cache":{"Profile 1":{"name":"Work"}}}}`)
+
+	if err := Route("https://x.com/foo"); err != nil {
+		t.Fatalf("Route: %v", err)
+	}
+	want := []string{"--profile-directory=Profile 1", "https://xcancel.com/foo"}
+	if !reflect.DeepEqual(h.gotArgs, want) {
+		t.Errorf("args = %v, want %v", h.gotArgs, want)
+	}
+}
+
+func TestRouteDelayedRewriteKeepsOriginalMatch(t *testing.T) {
+	// A delayed rewrite (delayed=true) runs after matching, so the profile is
+	// chosen from the original host while Chrome launches the rewritten URL.
+	h := newRouteHarness(t)
+	h.writeConfigRaw(t,
+		`[{"id":"r","enabled":true,"pattern":"x\\.com","profile_directory":"Profile 1"}]`,
+		`[{"id":"swap","enabled":true,"find":"x.com","replace":"xcancel.com","delayed":true}]`)
+	h.writeLocalState(t, `{"profile":{"info_cache":{"Profile 1":{"name":"Work"}}}}`)
+
+	if err := Route("https://x.com/foo"); err != nil {
+		t.Fatalf("Route: %v", err)
+	}
+	// Profile 1 (matched on x.com) but the launched URL is rewritten.
+	want := []string{"--profile-directory=Profile 1", "https://xcancel.com/foo"}
+	if !reflect.DeepEqual(h.gotArgs, want) {
+		t.Errorf("args = %v, want %v", h.gotArgs, want)
+	}
+}
+
+func TestRouteDelayedRewriteWouldHaveBrokenMatch(t *testing.T) {
+	// Same rewrite as above but delayed: had it run before matching, the x.com
+	// rule would no longer match and the URL would fall through to Chrome default.
+	// Delaying it preserves the match — this is the reason the option exists.
+	h := newRouteHarness(t)
+	h.writeConfigRaw(t,
+		`[{"id":"r","enabled":true,"pattern":"x\\.com","profile_directory":"Profile 1"}]`,
+		`[{"id":"swap","enabled":true,"find":"x.com","replace":"xcancel.com","delayed":true}]`)
+	h.writeLocalState(t, `{"profile":{"info_cache":{"Profile 1":{"name":"Work"}}}}`)
+
+	if err := Route("https://x.com/foo"); err != nil {
+		t.Fatalf("Route: %v", err)
+	}
+	if h.gotArgs[0] != "--profile-directory=Profile 1" {
+		t.Errorf("delayed rewrite should preserve the match; args = %v", h.gotArgs)
 	}
 }
 

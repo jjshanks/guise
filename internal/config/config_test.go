@@ -82,3 +82,51 @@ func TestSaveLoadRoundTripAtomic(t *testing.T) {
 		t.Errorf("round trip mismatch:\n got %s\nwant %s", gotJSON, wantJSON)
 	}
 }
+
+func TestSaveLoadRoundTripRewrites(t *testing.T) {
+	t.Setenv("APPDATA", t.TempDir())
+	want := &Config{
+		Version: SchemaVersion,
+		Rules:   []Rule{},
+		Rewrites: []Rewrite{
+			{ID: "x", Enabled: true, Find: "x.com", Replace: "xcancel.com", Comment: "nitter-style"},
+			{ID: "late", Enabled: true, Find: "a.com", Replace: "b.com", Delayed: true},
+		},
+	}
+	if err := Save(want); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(got.Rewrites) != 2 {
+		t.Fatalf("got %d rewrites, want 2", len(got.Rewrites))
+	}
+	if got.Rewrites[0].Find != "x.com" || got.Rewrites[0].Replace != "xcancel.com" || got.Rewrites[0].Delayed {
+		t.Errorf("rewrite[0] round trip wrong: %+v", got.Rewrites[0])
+	}
+	if !got.Rewrites[1].Delayed {
+		t.Errorf("rewrite[1] should be delayed: %+v", got.Rewrites[1])
+	}
+}
+
+func TestLoadNormalizesNilRewrites(t *testing.T) {
+	// A config written before rewrites existed has no "rewrites" key; Load must
+	// surface an empty (non-nil) slice so the editor and router never see nil.
+	dir := t.TempDir()
+	t.Setenv("APPDATA", dir)
+	if err := os.MkdirAll(Dir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(Path(), []byte(`{"version":1,"rules":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Rewrites == nil {
+		t.Error("Rewrites should be normalized to an empty slice, got nil")
+	}
+}

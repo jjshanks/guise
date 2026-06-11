@@ -38,6 +38,12 @@ func Route(url string) error {
 		log.Printf("config error, routing to Chrome default: %v", err)
 	}
 
+	// Pre-rewrites (§15) run before profile selection, so both the match below and
+	// the launched URL see the rewritten string. A nil/empty rewrite list is a
+	// no-op, so configs without rewrites route exactly as before.
+	original := url
+	url, preApplied := ApplyRewrites(cfg.Rewrites, url, false)
+
 	res := Match(cfg, url)
 	profileDir := res.ProfileDirectory
 	// rule is the matched rule id, or "default" on no match. It is carried to the
@@ -48,6 +54,11 @@ func Route(url string) error {
 	if res.Matched {
 		rule = res.Rule.ID
 	}
+
+	// Delayed rewrites (§15) run after the profile is chosen, so a transform can
+	// change the launched URL without affecting which profile it routes to.
+	url, postApplied := ApplyRewrites(cfg.Rewrites, url, true)
+	applied := append(preApplied, postApplied...)
 
 	// A profile must be syntactically valid and still exist; otherwise fall back
 	// to Chrome's default (§10). The syntax check guards against a tampered
@@ -67,11 +78,14 @@ func Route(url string) error {
 
 	args := launchArgs(profileDir, url)
 	if err := startProcess(chromePath, args...); err != nil {
-		log.Printf("launch failed url=%q rule=%q profile=%q chrome=%q: %v", url, rule, profileDir, chromePath, err)
+		log.Printf("launch failed url=%q final=%q rule=%q profile=%q chrome=%q: %v", original, url, rule, profileDir, chromePath, err)
 		notifyError("Guise", "Failed to launch Chrome:\n"+err.Error())
 		return fmt.Errorf("launching chrome: %w", err)
 	}
-	log.Printf("routed url=%q rule=%q profile=%q chrome=%q", url, rule, profileDir, chromePath)
+	// One consolidated line per click (§9). final= and rewrites= are included so a
+	// URL the rewrites changed is debuggable; for the common no-rewrite case final
+	// equals url and rewrites is empty.
+	log.Printf("routed url=%q final=%q rule=%q profile=%q rewrites=%v chrome=%q", original, url, rule, profileDir, applied, chromePath)
 	return nil
 }
 

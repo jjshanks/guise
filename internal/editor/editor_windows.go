@@ -47,6 +47,38 @@ func (m *rulesModel) Value(row, col int) interface{} {
 	return ""
 }
 
+// rewritesModel adapts the rewrite slice to a walk TableView (§15).
+type rewritesModel struct {
+	walk.TableModelBase
+	rewrites *[]config.Rewrite
+}
+
+func (m *rewritesModel) RowCount() int { return len(*m.rewrites) }
+
+func (m *rewritesModel) Value(row, col int) interface{} {
+	r := (*m.rewrites)[row]
+	switch col {
+	case 0:
+		if r.Enabled {
+			return "✓"
+		}
+		return ""
+	case 1:
+		return r.Find
+	case 2:
+		return r.Replace
+	case 3:
+		// Show the timing in the same words the detail checkbox uses.
+		if r.Delayed {
+			return "after match"
+		}
+		return "before match"
+	case 4:
+		return r.Comment
+	}
+	return ""
+}
+
 type window struct {
 	mw       *walk.MainWindow
 	cfg      *config.Config
@@ -59,6 +91,7 @@ type window struct {
 	// reset to "Chrome default".
 	profileOptions []string
 	model          *rulesModel
+	rwModel        *rewritesModel
 
 	tv         *walk.TableView
 	enabledCB  *walk.CheckBox
@@ -71,15 +104,26 @@ type window struct {
 	testResult *walk.Label
 	status     *walk.Label
 
-	current int  // index of the rule shown in the detail pane, or -1.
-	loading bool // true while populating widgets, to suppress write-back.
+	// Rewrite tab widgets (§15).
+	rwTV        *walk.TableView
+	rwEnabledCB *walk.CheckBox
+	rwFindEd    *walk.LineEdit
+	rwFindErr   *walk.Label
+	rwReplaceEd *walk.LineEdit
+	rwDelayedCB *walk.CheckBox
+	rwCommentEd *walk.LineEdit
+
+	current   int  // index of the rule shown in the detail pane, or -1.
+	rwCurrent int  // index of the rewrite shown in its detail pane, or -1.
+	loading   bool // true while populating rule widgets, to suppress write-back.
+	rwLoading bool // true while populating rewrite widgets, to suppress write-back.
 }
 
 // Show opens the editor modally on the calling goroutine and returns when the
 // window closes. The caller is responsible for running it on its own OS thread
 // (the tray launches it in a fresh goroutine).
 func Show() error {
-	w := &window{current: -1}
+	w := &window{current: -1, rwCurrent: -1}
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -91,6 +135,7 @@ func Show() error {
 	w.profiles, _ = chrome.Profiles() // Best effort; dropdown may be empty.
 	w.profileOptions = profileOptionDirs(w.profiles, w.cfg.Rules)
 	w.model = &rulesModel{rules: &w.cfg.Rules, nameFor: w.friendlyName}
+	w.rwModel = &rewritesModel{rewrites: &w.cfg.Rewrites}
 
 	return w.build()
 }
@@ -133,52 +178,120 @@ func (w *window) build() error {
 				Children: []d.Widget{
 					d.Label{Text: "Test URL:"},
 					d.LineEdit{AssignTo: &w.testEd, OnTextChanged: w.onTest},
-					d.Label{AssignTo: &w.testResult, Text: "type a URL to see which rule wins"},
+					d.Label{AssignTo: &w.testResult, Text: "type a URL to see how it routes"},
 				},
 			},
-			// Rules table + reorder/CRUD buttons.
-			d.Composite{
-				Layout: d.HBox{MarginsZero: true},
-				Children: []d.Widget{
-					d.TableView{
-						AssignTo:         &w.tv,
-						MinSize:          d.Size{Height: 220},
-						AlternatingRowBG: true,
-						Columns: []d.TableViewColumn{
-							{Title: "On", Width: 36},
-							{Title: "Pattern", Width: 320},
-							{Title: "Profile", Width: 150},
-							{Title: "Comment", Width: 200},
-						},
-						Model:                 w.model,
-						OnCurrentIndexChanged: w.onSelect,
-					},
-					d.Composite{
-						Layout: d.VBox{MarginsZero: true},
+			// Rules and Rewrites live on separate tabs so neither table crowds the
+			// other (§6.2, §15). The Test URL row above runs the full pipeline —
+			// pre-rewrite, match, delayed-rewrite — against either tab's data.
+			d.TabWidget{
+				Pages: []d.TabPage{
+					{
+						Title:  "Rules",
+						Layout: d.VBox{},
 						Children: []d.Widget{
-							d.PushButton{Text: "Add", OnClicked: w.onAdd},
-							d.PushButton{Text: "Delete", OnClicked: w.onDelete},
-							d.PushButton{Text: "Move ↑", OnClicked: func() { w.onMove(-1) }},
-							d.PushButton{Text: "Move ↓", OnClicked: func() { w.onMove(1) }},
-							d.VSpacer{},
+							// Rules table + reorder/CRUD buttons.
+							d.Composite{
+								Layout: d.HBox{MarginsZero: true},
+								Children: []d.Widget{
+									d.TableView{
+										AssignTo:         &w.tv,
+										MinSize:          d.Size{Height: 200},
+										AlternatingRowBG: true,
+										Columns: []d.TableViewColumn{
+											{Title: "On", Width: 36},
+											{Title: "Pattern", Width: 320},
+											{Title: "Profile", Width: 150},
+											{Title: "Comment", Width: 200},
+										},
+										Model:                 w.model,
+										OnCurrentIndexChanged: w.onSelect,
+									},
+									d.Composite{
+										Layout: d.VBox{MarginsZero: true},
+										Children: []d.Widget{
+											d.PushButton{Text: "Add", OnClicked: w.onAdd},
+											d.PushButton{Text: "Delete", OnClicked: w.onDelete},
+											d.PushButton{Text: "Move ↑", OnClicked: func() { w.onMove(-1) }},
+											d.PushButton{Text: "Move ↓", OnClicked: func() { w.onMove(1) }},
+											d.VSpacer{},
+										},
+									},
+								},
+							},
+							// Detail editor for the selected rule.
+							d.GroupBox{
+								Title:  "Selected rule",
+								Layout: d.Grid{Columns: 2},
+								Children: []d.Widget{
+									d.CheckBox{AssignTo: &w.enabledCB, Text: "Enabled", OnCheckedChanged: w.writeBack, ColumnSpan: 2},
+									d.Label{Text: "Pattern (RE2, unanchored, case-sensitive):"},
+									d.LineEdit{AssignTo: &w.patternEd, OnTextChanged: w.onPatternChanged},
+									d.Label{Text: ""},
+									d.Label{AssignTo: &w.patternErr, Text: ""},
+									d.Label{Text: "Profile:"},
+									d.ComboBox{AssignTo: &w.profileCB, OnCurrentIndexChanged: w.writeBack},
+									d.Label{Text: "Comment:"},
+									d.LineEdit{AssignTo: &w.commentEd, OnTextChanged: w.writeBack},
+								},
+							},
 						},
 					},
-				},
-			},
-			// Detail editor for the selected rule.
-			d.GroupBox{
-				Title:  "Selected rule",
-				Layout: d.Grid{Columns: 2},
-				Children: []d.Widget{
-					d.CheckBox{AssignTo: &w.enabledCB, Text: "Enabled", OnCheckedChanged: w.writeBack, ColumnSpan: 2},
-					d.Label{Text: "Pattern (RE2, unanchored, case-sensitive):"},
-					d.LineEdit{AssignTo: &w.patternEd, OnTextChanged: w.onPatternChanged},
-					d.Label{Text: ""},
-					d.Label{AssignTo: &w.patternErr, Text: ""},
-					d.Label{Text: "Profile:"},
-					d.ComboBox{AssignTo: &w.profileCB, OnCurrentIndexChanged: w.writeBack},
-					d.Label{Text: "Comment:"},
-					d.LineEdit{AssignTo: &w.commentEd, OnTextChanged: w.writeBack},
+					{
+						Title:  "Rewrites",
+						Layout: d.VBox{},
+						Children: []d.Widget{
+							d.Label{Text: "Literal find/replace on the URL, applied in order. " +
+								"“Before match” rewrites run before profile selection; “after match” run after it."},
+							// Rewrites table + reorder/CRUD buttons.
+							d.Composite{
+								Layout: d.HBox{MarginsZero: true},
+								Children: []d.Widget{
+									d.TableView{
+										AssignTo:         &w.rwTV,
+										MinSize:          d.Size{Height: 180},
+										AlternatingRowBG: true,
+										Columns: []d.TableViewColumn{
+											{Title: "On", Width: 36},
+											{Title: "Find", Width: 220},
+											{Title: "Replace", Width: 220},
+											{Title: "When", Width: 100},
+											{Title: "Comment", Width: 160},
+										},
+										Model:                 w.rwModel,
+										OnCurrentIndexChanged: w.onSelectRewrite,
+									},
+									d.Composite{
+										Layout: d.VBox{MarginsZero: true},
+										Children: []d.Widget{
+											d.PushButton{Text: "Add", OnClicked: w.onAddRewrite},
+											d.PushButton{Text: "Delete", OnClicked: w.onDeleteRewrite},
+											d.PushButton{Text: "Move ↑", OnClicked: func() { w.onMoveRewrite(-1) }},
+											d.PushButton{Text: "Move ↓", OnClicked: func() { w.onMoveRewrite(1) }},
+											d.VSpacer{},
+										},
+									},
+								},
+							},
+							// Detail editor for the selected rewrite.
+							d.GroupBox{
+								Title:  "Selected rewrite",
+								Layout: d.Grid{Columns: 2},
+								Children: []d.Widget{
+									d.CheckBox{AssignTo: &w.rwEnabledCB, Text: "Enabled", OnCheckedChanged: w.writeBackRewrite, ColumnSpan: 2},
+									d.Label{Text: "Find (literal text):"},
+									d.LineEdit{AssignTo: &w.rwFindEd, OnTextChanged: w.onFindChanged},
+									d.Label{Text: ""},
+									d.Label{AssignTo: &w.rwFindErr, Text: ""},
+									d.Label{Text: "Replace with:"},
+									d.LineEdit{AssignTo: &w.rwReplaceEd, OnTextChanged: w.writeBackRewrite},
+									d.CheckBox{AssignTo: &w.rwDelayedCB, Text: "Apply after profile match (delayed)", OnCheckedChanged: w.writeBackRewrite, ColumnSpan: 2},
+									d.Label{Text: "Comment:"},
+									d.LineEdit{AssignTo: &w.rwCommentEd, OnTextChanged: w.writeBackRewrite},
+								},
+							},
+						},
+					},
 				},
 			},
 			// Chrome path row.
@@ -217,7 +330,8 @@ func (w *window) build() error {
 	}
 
 	w.fillProfileCombo()
-	w.populate() // Clears detail pane (nothing selected yet).
+	w.populate()        // Clears the rule detail pane (nothing selected yet).
+	w.populateRewrite() // Same for the rewrite detail pane.
 
 	w.mw.Run()
 	return nil
@@ -371,28 +485,130 @@ func (w *window) onMove(delta int) {
 	w.tv.SetCurrentIndex(j)
 }
 
-// onTest reports which rule would win for the typed URL, without launching,
-// and selects the matching row (§6.2). Writes pending edits back first so the
-// test reflects exactly what is on screen.
+// onTest reports how the typed URL routes, without launching, and selects the
+// winning rule row (§6.2). It mirrors ROUTE order (§15): apply pre-rewrites,
+// match, then apply delayed rewrites, so the preview reflects both rewrites and
+// rules exactly as a real click would. Pending edits on both detail panes are
+// flushed first so the test sees what's on screen.
 func (w *window) onTest() {
-	w.writeBack() // Flush the detail pane so the test sees what's on screen.
+	w.writeBack()
+	w.writeBackRewrite()
 	url := w.testEd.Text()
 	if url == "" {
-		w.testResult.SetText("type a URL to see which rule wins")
+		w.testResult.SetText("type a URL to see how it routes")
 		return
 	}
-	res := router.Match(w.cfg, url)
-	if !res.Matched {
-		w.testResult.SetText("no match → Chrome default")
-		return
-	}
-	for i := range w.cfg.Rules {
-		if &w.cfg.Rules[i] == res.Rule {
-			w.tv.SetCurrentIndex(i)
-			break
+	routeURL, _ := router.ApplyRewrites(w.cfg.Rewrites, url, false)
+	res := router.Match(w.cfg, routeURL)
+	finalURL, _ := router.ApplyRewrites(w.cfg.Rewrites, routeURL, true)
+
+	profile := "Chrome default"
+	if res.Matched {
+		profile = w.friendlyName(res.ProfileDirectory)
+		for i := range w.cfg.Rules {
+			if &w.cfg.Rules[i] == res.Rule {
+				w.tv.SetCurrentIndex(i)
+				break
+			}
 		}
 	}
-	w.testResult.SetText(fmt.Sprintf("→ %s", w.friendlyName(res.ProfileDirectory)))
+	msg := "→ " + profile
+	if finalURL != url {
+		// A rewrite changed the URL; show what Chrome would actually open.
+		msg += fmt.Sprintf("  (opens %s)", finalURL)
+	}
+	w.testResult.SetText(msg)
+}
+
+func (w *window) onSelectRewrite() {
+	w.rwCurrent = w.rwTV.CurrentIndex()
+	w.populateRewrite()
+}
+
+// populateRewrite loads the rewrite detail widgets from the current rewrite (or
+// clears them). Mirrors populate() for rules.
+func (w *window) populateRewrite() {
+	w.rwLoading = true
+	defer func() { w.rwLoading = false }()
+
+	if w.rwCurrent < 0 || w.rwCurrent >= len(w.cfg.Rewrites) {
+		w.rwEnabledCB.SetChecked(false)
+		w.rwFindEd.SetText("")
+		w.rwReplaceEd.SetText("")
+		w.rwDelayedCB.SetChecked(false)
+		w.rwCommentEd.SetText("")
+		w.rwFindErr.SetText("")
+		return
+	}
+	r := w.cfg.Rewrites[w.rwCurrent]
+	w.rwEnabledCB.SetChecked(r.Enabled)
+	w.rwFindEd.SetText(r.Find)
+	w.rwReplaceEd.SetText(r.Replace)
+	w.rwDelayedCB.SetChecked(r.Delayed)
+	w.rwCommentEd.SetText(r.Comment)
+	w.validateFind(r.Find)
+}
+
+// writeBackRewrite copies the rewrite detail widgets into the current rewrite
+// and refreshes the table row. Suppressed while populating.
+func (w *window) writeBackRewrite() {
+	if w.rwLoading || w.rwCurrent < 0 || w.rwCurrent >= len(w.cfg.Rewrites) {
+		return
+	}
+	r := &w.cfg.Rewrites[w.rwCurrent]
+	r.Enabled = w.rwEnabledCB.Checked()
+	r.Find = w.rwFindEd.Text()
+	r.Replace = w.rwReplaceEd.Text()
+	r.Delayed = w.rwDelayedCB.Checked()
+	r.Comment = w.rwCommentEd.Text()
+	w.rwModel.PublishRowChanged(w.rwCurrent)
+}
+
+func (w *window) onFindChanged() {
+	w.validateFind(w.rwFindEd.Text())
+	w.writeBackRewrite()
+}
+
+// validateFind warns when Find is blank: router.ApplyRewrites skips a blank
+// Find (an empty search would splice Replace between every character), so the
+// rewrite is inert until the user types something.
+func (w *window) validateFind(find string) {
+	if find == "" {
+		w.rwFindErr.SetText("⚠ empty find — this rewrite is ignored")
+	} else {
+		w.rwFindErr.SetText("")
+	}
+}
+
+func (w *window) onAddRewrite() {
+	w.cfg.Rewrites = append(w.cfg.Rewrites, config.Rewrite{ID: genID(), Enabled: true})
+	w.rwModel.PublishRowsReset()
+	w.rwTV.SetCurrentIndex(len(w.cfg.Rewrites) - 1)
+}
+
+func (w *window) onDeleteRewrite() {
+	i := w.rwCurrent
+	if i < 0 || i >= len(w.cfg.Rewrites) {
+		return
+	}
+	w.cfg.Rewrites = append(w.cfg.Rewrites[:i], w.cfg.Rewrites[i+1:]...)
+	w.rwModel.PublishRowsReset()
+	w.rwCurrent = -1
+	w.rwTV.SetCurrentIndex(-1)
+	w.populateRewrite()
+}
+
+// onMoveRewrite reorders the selected rewrite by delta. Order is application
+// order (rewrites chain), so reordering is meaningful (§15).
+func (w *window) onMoveRewrite(delta int) {
+	i := w.rwCurrent
+	j := i + delta
+	if i < 0 || j < 0 || j >= len(w.cfg.Rewrites) {
+		return
+	}
+	w.cfg.Rewrites[i], w.cfg.Rewrites[j] = w.cfg.Rewrites[j], w.cfg.Rewrites[i]
+	w.rwModel.PublishRowsReset()
+	w.rwTV.SetCurrentIndex(j)
 }
 
 func (w *window) onAutoDetect() {

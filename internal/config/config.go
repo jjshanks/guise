@@ -21,6 +21,31 @@ type Rule struct {
 	Comment          string `json:"comment"`
 }
 
+// Rewrite is a literal find-and-replace transform applied to the URL before it
+// is launched (§15). Unlike Rules, rewrites are not first-match-wins: every
+// enabled rewrite is applied in order, each operating on the output of the one
+// before, so transforms chain (e.g. swap the host, then strip a query param).
+//
+// Timing is governed by Delayed:
+//   - Delayed == false (the default): the rewrite runs BEFORE profile selection,
+//     so both the profile match and the launched URL see the rewritten string.
+//     This is the common case — e.g. x.com → xcancel.com, then route as usual.
+//   - Delayed == true: the rewrite runs AFTER profile matching, so the profile is
+//     chosen from the original URL but Chrome launches the rewritten URL. Use this
+//     when the rewrite would otherwise change which profile a URL routes to.
+//
+// Find/Replace are literal substrings (no regex in the MVP); every occurrence of
+// Find is replaced. A blank Find is inert (it would otherwise splice Replace
+// between every character), mirroring how a blank rule Pattern is skipped.
+type Rewrite struct {
+	ID      string `json:"id"`
+	Enabled bool   `json:"enabled"`
+	Find    string `json:"find"`              // Literal substring to match (no regex in the MVP).
+	Replace string `json:"replace"`           // Literal replacement for every occurrence of Find.
+	Delayed bool   `json:"delayed,omitempty"` // Apply after profile matching instead of before.
+	Comment string `json:"comment"`
+}
+
 // Config is the full configuration document (§5.2).
 type Config struct {
 	Version    int    `json:"version"`
@@ -31,6 +56,10 @@ type Config struct {
 	// is on by default without having to rewrite existing configs.
 	AutoUpdate *bool  `json:"auto_update,omitempty"`
 	Rules      []Rule `json:"rules"`
+	// Rewrites are literal URL find-and-replace transforms (§15). Omitted from
+	// JSON when empty so existing configs (and the round-trip) are unaffected
+	// until a rewrite is actually added.
+	Rewrites []Rewrite `json:"rewrites,omitempty"`
 }
 
 // AutoUpdateEnabled reports whether the tray should check for new releases in
@@ -81,6 +110,9 @@ func Load() (*Config, error) {
 	}
 	if cfg.Rules == nil {
 		cfg.Rules = []Rule{}
+	}
+	if cfg.Rewrites == nil {
+		cfg.Rewrites = []Rewrite{}
 	}
 	return &cfg, nil
 }
