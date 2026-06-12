@@ -9,6 +9,9 @@ package winreg
 import (
 	"errors"
 	"fmt"
+	"log"
+	"os"
+	"strings"
 
 	"golang.org/x/sys/windows/registry"
 )
@@ -23,9 +26,16 @@ const (
 	clientKey         = `SOFTWARE\Clients\StartMenuInternet\Guise`
 	capabilitiesKey   = clientKey + `\Capabilities`
 	registeredAppsKey = `SOFTWARE\RegisteredApplications`
-	classesProgIDKey  = `SOFTWARE\Classes\` + progID
+	classesKey        = `SOFTWARE\Classes`
+	classesProgIDKey  = classesKey + `\` + progID
 	runKey            = `SOFTWARE\Microsoft\Windows\CurrentVersion\Run`
-	userChoiceKey     = `SOFTWARE\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice`
+
+	// assocBase is the per-scheme root Windows uses to record the chosen URL
+	// handler (§3.3). Each scheme has a UserChoice and a newer, UCPD-protected
+	// UserChoiceLatest beneath it; userChoiceKey is the https UserChoice that
+	// IsDefault reads.
+	assocBase     = `SOFTWARE\Microsoft\Windows\Shell\Associations\UrlAssociations\`
+	userChoiceKey = assocBase + `https\UserChoice`
 )
 
 // command builds the shell open command: "<exe>" "%1". Windows substitutes the
@@ -109,6 +119,134 @@ func IsDefault() (bool, error) {
 		return false, fmt.Errorf("reading ProgId: %w", err)
 	}
 	return got == progID, nil
+}
+
+// RepairStaleDefaults re-points stale ProgIDs left by earlier registrations of
+// this tool (e.g. URLRouterHTML from before the urlrouter→guise rename) at the
+// current exe (#8). Windows 11 keeps two handler records per scheme —
+// UserChoice and the UCPD-protected UserChoiceLatest — and either can name a
+// ProgID whose own shell\open\command points at a deleted binary, which makes
+// every click fail with "Application not found" before guise is even invoked.
+// Apps cannot write UserChoiceLatest, so the only self-service fix is to repair
+// the ProgID's class (all HKCU) so it launches guise as an alias.
+//
+// It only touches ProgIDs that have an HKCU class command whose exe is missing,
+// so system browsers (ChromeHTML, MSEdgeHTM — defined in HKLM) are never
+// hijacked. Like routing, it fails soft: per-ProgID errors are logged and
+// skipped, never returned. The slice of repaired ProgIDs is for the caller to
+// log.
+func RepairStaleDefaults(exe string) []string {
+	seen := map[string]bool{}
+	var candidates []string
+	for _, scheme := range []string{"http", "https"} {
+		for _, choice := range []string{"UserChoice", "UserChoiceLatest"} {
+			pid := readProgID(assocBase + scheme + `\` + choice)
+			// Skip the empty string, our own ProgID, and duplicates so each
+			// candidate is examined once.
+			if pid == "" || pid == progID || seen[pid] {
+				continue
+			}
+			seen[pid] = true
+			candidates = append(candidates, pid)
+		}
+	}
+	return repairProgIDs(exe, candidates)
+}
+
+// repairProgIDs rewrites the shell\open\command of each candidate ProgID that
+// has an HKCU class command whose exe is missing, pointing it at exe. ProgIDs
+// without an HKCU class command (system-managed) or whose handler still exists
+// are left untouched. Split out from RepairStaleDefaults so tests can drive it
+// with throwaway ProgIDs without writing the real UserChoice keys.
+func repairProgIDs(exe string, candidates []string) []string {
+	var repaired []string
+	for _, pid := range candidates {
+		cmdKey := classesKey + `\` + pid + `\shell\open\command`
+		cmd, err := readString(cmdKey, "")
+		if err != nil {
+			// A real registry error (e.g. broken ACL): log and skip rather than
+			// mistake it for an absent key, but keep the pass alive.
+			log.Printf("reading command for ProgID %q: %v", pid, err)
+			continue
+		}
+		if cmd == "" {
+			// No HKCU class command: not one of ours (system-managed). Leave it.
+			continue
+		}
+		if handler := exeFromCommand(cmd); handler == "" || fileExists(handler) {
+			continue // Still resolvable — nothing to repair.
+		}
+		if err := setString(cmdKey, "", command(exe)); err != nil {
+			log.Printf("repair stale ProgID %q: %v", pid, err)
+			continue
+		}
+		repaired = append(repaired, pid)
+	}
+	return repaired
+}
+
+// readProgID returns the ProgId value at a UserChoice/UserChoiceLatest key, or
+// "" if the key or value is missing. A real read error is logged (and yields
+// "") so callers treat it the same as "nothing to repair" without losing the
+// diagnostic.
+func readProgID(path string) string {
+	pid, err := readString(path, "ProgId")
+	if err != nil {
+		log.Printf("reading ProgId at %s: %v", path, err)
+	}
+	return pid
+}
+
+// readString reads a string value (name "" = the (Default) value). A missing
+// key or value returns ("", nil) — absence is not an error here; any other
+// failure (broken ACL, wrong value type) is returned so the caller can log it.
+func readString(path, name string) (string, error) {
+	k, err := registry.OpenKey(registry.CURRENT_USER, path, registry.QUERY_VALUE)
+	if err != nil {
+		if errors.Is(err, registry.ErrNotExist) {
+			return "", nil
+		}
+		return "", err
+	}
+	defer k.Close()
+	v, _, err := k.GetStringValue(name)
+	if err != nil {
+		if errors.Is(err, registry.ErrNotExist) {
+			return "", nil
+		}
+		return "", err
+	}
+	return v, nil
+}
+
+// exeFromCommand extracts the executable from a shell\open\command string. A
+// quoted exe ("C:\path\app.exe" "%1") wins to the closing quote; otherwise the
+// first whitespace-delimited token is taken. Any %VAR% is expanded so the path
+// can be stat'd. Returns "" if no exe can be parsed.
+func exeFromCommand(cmd string) string {
+	cmd = strings.TrimSpace(cmd)
+	var exe string
+	if strings.HasPrefix(cmd, `"`) {
+		if end := strings.IndexByte(cmd[1:], '"'); end >= 0 {
+			exe = cmd[1 : 1+end]
+		}
+	} else if i := strings.IndexByte(cmd, ' '); i >= 0 {
+		exe = cmd[:i]
+	} else {
+		exe = cmd
+	}
+	if expanded, err := registry.ExpandString(exe); err == nil {
+		exe = expanded
+	}
+	return exe
+}
+
+// fileExists reports whether path resolves to an existing regular file. A
+// leftover install *directory* (binary removed but folder intact) must still
+// count as a stale handler, since the shell command can no longer launch it.
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 // SetAutostart toggles the login autostart Run value (§7). When enabled it

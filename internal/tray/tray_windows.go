@@ -74,6 +74,13 @@ func onReady(exe string) {
 	// exiting); the next startup clears it.
 	updater.CleanupOld(exe)
 
+	// Re-point any stale ProgIDs from earlier installs at this exe so a
+	// UserChoiceLatest still naming them doesn't dead-end clicks (#8, §3.3).
+	// This heals existing installs at login without re-running --register.
+	if repaired := winreg.RepairStaleDefaults(exe); len(repaired) > 0 {
+		log.Printf("repaired stale ProgIDs: %v", repaired)
+	}
+
 	systray.SetIcon(assets.Icon)
 	systray.SetTitle("Guise")
 	systray.SetTooltip("Guise — route URLs to Chrome profiles")

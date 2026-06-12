@@ -3,6 +3,7 @@
 package winreg
 
 import (
+	"strings"
 	"testing"
 
 	"golang.org/x/sys/windows/registry"
@@ -13,6 +14,33 @@ func TestCommandQuoting(t *testing.T) {
 	want := `"C:\Program Files\Guise\guise.exe" "%1"`
 	if got != want {
 		t.Errorf("command = %q, want %q", got, want)
+	}
+}
+
+func TestExeFromCommand(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  string
+		want string
+	}{
+		{"quoted with arg", `"C:\Program Files\App\app.exe" "%1"`, `C:\Program Files\App\app.exe`},
+		{"unquoted with arg", `C:\Apps\app.exe "%1"`, `C:\Apps\app.exe`},
+		{"bare exe", `C:\Apps\app.exe`, `C:\Apps\app.exe`},
+		{"leading space", `  "C:\Apps\app.exe" "%1"`, `C:\Apps\app.exe`},
+		{"empty", ``, ``},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := exeFromCommand(tt.cmd); got != tt.want {
+				t.Errorf("exeFromCommand(%q) = %q, want %q", tt.cmd, got, tt.want)
+			}
+		})
+	}
+
+	// An env-var-prefixed path is expanded so it can be stat'd. %SystemRoot% is
+	// always set on Windows, so the result must start with its expansion.
+	if got := exeFromCommand(`%SystemRoot%\system32\app.exe`); !strings.Contains(got, `\system32\app.exe`) || strings.Contains(got, "%") {
+		t.Errorf("exeFromCommand env expansion = %q, want %%SystemRoot%% expanded", got)
 	}
 }
 
