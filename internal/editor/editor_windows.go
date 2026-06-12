@@ -333,9 +333,20 @@ func (w *window) build() error {
 	w.populate()        // Clears the rule detail pane (nothing selected yet).
 	w.populateRewrite() // Same for the rewrite detail pane.
 
+	// Test seam: a GUI test sets afterBuild to drive the live widgets on the GUI
+	// thread (via Synchronize) and then close the window. nil in normal use.
+	if afterBuild != nil {
+		w.mw.Synchronize(func() { afterBuild(w) })
+	}
+
 	w.mw.Run()
 	return nil
 }
+
+// afterBuild, when non-nil, is invoked once on the GUI thread right after the
+// editor window is built (see build). It exists only so a Windows GUI test can
+// exercise the real walk widgets; production code never sets it.
+var afterBuild func(*window)
 
 // friendlyName maps a profile directory to its display name for the table.
 func (w *window) friendlyName(dir string) string {
