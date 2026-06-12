@@ -47,10 +47,12 @@ All registry writes target `HKEY_CURRENT_USER` (see §3), so **no mode ever need
                         ┌──────────────────────────┐
                         │  ROUTE mode               │
                         │  1. load config           │
-                        │  2. regex match (ordered) │
-                        │  3. resolve profile        │
-                        │  4. exec chrome.exe        │
-                        │  5. exit immediately       │
+                        │  2. pre-rewrites (§15)    │
+                        │  3. regex match (ordered) │
+                        │  4. resolve profile        │
+                        │  5. delayed rewrites (§15)│
+                        │  6. exec chrome.exe        │
+                        │  7. exit immediately       │
                         └─────────────┬────────────┘
                                       │ chrome.exe --profile-directory="Profile 3" <url>
                                       ▼
@@ -238,12 +240,23 @@ Resolution order (first found wins):
 }
 ```
 
+An optional `"rewrites"` array (§15) sits alongside `"rules"`; it is omitted from the file until a rewrite is added, so existing configs are untouched:
+
+```json
+{
+  "rewrites": [
+    { "id": "...", "enabled": true, "find": "x.com", "replace": "xcancel.com", "delayed": false, "comment": "open X via xcancel" }
+  ]
+}
+```
+
 Field notes:
 - `rules` order **is** evaluation order.
 - `pattern` is a Go `regexp` (RE2) pattern, matched **unanchored** against the full URL string (§5.3). RE2 has no backreferences — document this so users don't paste PCRE.
 - `profile_directory` stores the *directory* name (e.g. `Profile 3`); the editor shows the friendly name.
 - `chrome_path` empty = auto-detect (§4.3).
 - There is no default-profile field. When no rule matches, Chrome launches with no profile flag (§5.3).
+- `rewrites` are literal find/replace URL transforms applied in list order; `delayed` controls whether a rewrite runs before (default) or after profile matching (§15).
 
 ### 5.3 Matching semantics (the behavioral contract)
 
@@ -374,8 +387,15 @@ Pseudo-Go for the part everything else orbits around:
 func route(url string) error {
     cfg := loadConfigOrLastGood()       // never fatal
 
-    profileDir := ""                    // "" means: no --profile-directory flag
+    original := url                     // the URL as clicked
     rule := "default"                   // matched rule id, or "default" on no match
+
+    // Pre-rewrites run before matching (§15): both the match and the launched URL
+    // see the rewritten string. applyRewrites is a literal find/replace over the
+    // enabled rewrites whose `delayed` flag is false; an empty list is a no-op.
+    url, _ = applyRewrites(cfg.Rewrites, url, false /*delayed*/)
+
+    profileDir := ""                    // "" means: no --profile-directory flag
     for _, r := range cfg.Rules {
         if !r.Enabled {
             continue
@@ -390,6 +410,11 @@ func route(url string) error {
             break
         }
     }
+    // A vanished or syntactically invalid profile falls back to Chrome default (§10).
+
+    // Delayed rewrites run after matching (§15): they change the launched URL
+    // without affecting which profile was chosen.
+    url, rewrites := applyRewrites(cfg.Rewrites, url, true /*delayed*/)
 
     chrome := resolveChromePath(cfg)     // §4.3
     var args []string
@@ -400,13 +425,15 @@ func route(url string) error {
         args = append(args, url)
     }
     err := exec.Command(chrome, args...).Start() // Start, not Run — don't wait
-    // One consolidated line per click (§9): which rule won, where it routed.
-    log.Printf("routed url=%q rule=%q profile=%q chrome=%q", url, rule, profileDir, chrome)
+    // One consolidated line per click (§9): which rule won, where it routed, and
+    // the final URL plus the rewrites that produced it.
+    log.Printf("routed url=%q final=%q rule=%q profile=%q rewrites=%v chrome=%q",
+        original, url, rule, profileDir, rewrites, chrome)
     return err
 }
 ```
 
-Two things this encodes: the no-match path deliberately leaves `profileDir` empty so the `--profile-directory` flag is *omitted entirely* (Chrome's default behavior), and `exec.Command(...).Start()` (not `Run()`) fires Chrome and lets ROUTE mode exit immediately rather than lingering as Chrome's parent.
+In the real code (`internal/router`) the pre-rewrite → match → fallback → delayed-rewrite sequence is a single pure function, `Resolve`, that both `Route` and the editor's "Test URL" preview call, so the preview can never drift from a real click. Three things this encodes: the no-match path deliberately leaves `profileDir` empty so the `--profile-directory` flag is *omitted entirely* (Chrome's default behavior); rewrites (§15) bracket the match — non-delayed before, delayed after; and `exec.Command(...).Start()` (not `Run()`) fires Chrome and lets ROUTE mode exit immediately rather than lingering as Chrome's parent.
 
 ---
 
@@ -460,3 +487,39 @@ If step 2 fails, step 1 is rolled back so the registered path always resolves to
 - **Toggle.** A `"auto_update"` config field (absent ⇒ enabled) backs a tray checkbox, "Check for updates automatically." A manual "Check for updates now…" item is always available regardless of the toggle and reports its outcome (up to date / downloaded / error / "development build").
 - **Cadence.** One check at tray startup, then every 24 h while running. Releases are infrequent, so this keeps API traffic negligible; GitHub's unauthenticated rate limit is far above what a daily check needs.
 - **Fail soft.** Like routing (§2), the update path never takes the tray down. Network errors, API failures, and checksum mismatches are logged (§9) and, for a *manual* check, shown to the user; a *background* check stays silent unless an update is actually ready. Only the explicit user-driven Apply step replaces the binary.
+
+---
+
+## 15. URL rewrites
+
+A **rewrite** is a literal find-and-replace transform applied to the URL on its way to Chrome. The canonical use is host substitution — open every `https://x.com/...` link as `https://xcancel.com/...` — but Find/Replace operate on any substring, so path and query edits work too (e.g. strip a tracking parameter, or swap `/old/` for `/new/`).
+
+Rewrites are a **separate config list from routing rules** (`"rewrites"`, alongside `"rules"`), not a variant of `Rule`. They answer a different question — *what URL should open* — than rules, which answer *which profile opens it*. Keeping them separate leaves the §5.3 matching contract untouched.
+
+### 15.1 Semantics
+
+1. **Literal, not regex.** Find/Replace are plain substrings; every occurrence of Find is replaced (`strings.ReplaceAll`). This is the deliberate MVP scope — regex rewrites can come later without changing the config shape (a future `"regex": true` flag).
+2. **Chained, not first-match-wins.** Every enabled rewrite is applied in list order, each operating on the previous one's output. Two rewrites can therefore compose (swap the host, then strip a param). Order is editable in the tray, like rule order.
+3. **Inert when blank.** A rewrite with an empty Find is skipped — an empty search string would splice Replace between every character. (The editor warns, mirroring the blank-pattern warning for rules.) A Find that simply does not occur in the URL is a harmless no-op.
+4. **Disabled rewrites are skipped**, like disabled rules.
+
+### 15.2 Timing: before vs after profile matching
+
+Each rewrite carries a `"delayed"` flag that decides when it runs relative to profile selection:
+
+| `delayed` | When it runs | Profile is chosen from | Chrome opens |
+|---|---|---|---|
+| `false` (default) | **before** matching | the **rewritten** URL | the rewritten URL |
+| `true` | **after** matching | the **original** URL | the rewritten URL |
+
+The default (before) is what you want for the `x.com → xcancel.com` case: you generally also want any `xcancel.com` routing rule to see the rewritten host. The delayed option exists for the case where the rewrite would otherwise change *which* profile a URL routes to — there you match on the original URL, then rewrite the URL that actually launches.
+
+ROUTE order is therefore: **load config → apply non-delayed rewrites → match rules → apply delayed rewrites → launch**. The matcher and the launcher both run unchanged; rewrites only transform the string flowing between them.
+
+### 15.3 Where it lives
+
+The transform is a pure function in `internal/router` (`ApplyRewrites`), shared by ROUTE mode and the editor's "Test URL" preview (which now runs the full pre-rewrite → match → delayed-rewrite pipeline, so the preview matches a real click). It stays out of the hot path's failure modes: rewriting never errors, never blocks routing, and an absent/empty `"rewrites"` list routes exactly as before. The per-click log line (§9) gains `final=` (the launched URL) and `rewrites=` (the IDs that actually fired) so a rewritten URL is debuggable.
+
+### 15.4 Editor
+
+The rule editor (§6.2) gains a **Rewrites** tab beside **Rules**: a reorderable table (On / Find / Replace / When / Comment) with the same Add/Delete/Move controls, and a detail pane with Enabled, Find, Replace, an "Apply after profile match (delayed)" checkbox, and Comment. The shared Test URL field at the top reflects rewrites and rules together.
