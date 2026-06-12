@@ -119,12 +119,14 @@ Since Windows 10 1803 / Windows 11, apps **cannot** silently set themselves as t
 - Open **Settings → Apps → Default apps → Guise → Set default**, or
 - Click a link, and Windows shows a "How do you want to open this?" picker where Guise now appears.
 
-**Spec requirement:** after `--register`, the tray app should detect it is not yet the default and surface a one-click **"Open Default Apps settings"** button that deep-links to `ms-settings:defaultapps`. Detect current default by reading:
+**Spec requirement:** after `--register`, the tray app should detect it is not yet the default and surface a one-click **"Open Default Apps settings"** button that deep-links to `ms-settings:defaultapps`. Detect current default by reading the `ProgId` from **both** https handler records:
 
 ```
-HKCU\SOFTWARE\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice
-  ProgId = <should be "GuiseHTML" when we are default>
+HKCU\SOFTWARE\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice\ProgId
+HKCU\SOFTWARE\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoiceLatest\ProgId
 ```
+
+Windows 11 24H2+ resolves clicks through `UserChoiceLatest` preferentially (see 3.4), so reading `UserChoice` alone is not enough: a healthy-looking `UserChoice = GuiseHTML` can sit beside a stale `UserChoiceLatest` ProgID that dead-ends every click, producing a false "we are default" signal (#9). Report default only when **each populated key** names a ProgID whose `HKCU\SOFTWARE\Classes\<ProgID>\shell\open\command` resolves to the **current** `guise.exe` — so a stale ProgID in either slot, or one re-pointed at a deleted binary, correctly reads as *not* default. A repaired alias (3.4) whose command now launches the current `guise.exe` counts as default, since clicks reach guise. A missing key does not constrain the verdict.
 
 (The `UserChoice\Hash` value is intentionally tamper-protected by Windows; do **not** attempt to forge it. Read `ProgId` only to *detect* state, never to *set* it.)
 
