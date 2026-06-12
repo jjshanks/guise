@@ -162,8 +162,14 @@ func repairProgIDs(exe string, candidates []string) []string {
 	var repaired []string
 	for _, pid := range candidates {
 		cmdKey := classesKey + `\` + pid + `\shell\open\command`
-		cmd, ok := readString(cmdKey, "")
-		if !ok {
+		cmd, err := readString(cmdKey, "")
+		if err != nil {
+			// A real registry error (e.g. broken ACL): log and skip rather than
+			// mistake it for an absent key, but keep the pass alive.
+			log.Printf("reading command for ProgID %q: %v", pid, err)
+			continue
+		}
+		if cmd == "" {
 			// No HKCU class command: not one of ours (system-managed). Leave it.
 			continue
 		}
@@ -180,26 +186,37 @@ func repairProgIDs(exe string, candidates []string) []string {
 }
 
 // readProgID returns the ProgId value at a UserChoice/UserChoiceLatest key, or
-// "" if the key or value is missing or unreadable — callers treat absence the
-// same as "nothing to repair".
+// "" if the key or value is missing. A real read error is logged (and yields
+// "") so callers treat it the same as "nothing to repair" without losing the
+// diagnostic.
 func readProgID(path string) string {
-	pid, _ := readString(path, "ProgId")
+	pid, err := readString(path, "ProgId")
+	if err != nil {
+		log.Printf("reading ProgId at %s: %v", path, err)
+	}
 	return pid
 }
 
-// readString reads a string value (name "" = the (Default) value), reporting
-// ok=false for any missing key/value or read error.
-func readString(path, name string) (string, bool) {
+// readString reads a string value (name "" = the (Default) value). A missing
+// key or value returns ("", nil) — absence is not an error here; any other
+// failure (broken ACL, wrong value type) is returned so the caller can log it.
+func readString(path, name string) (string, error) {
 	k, err := registry.OpenKey(registry.CURRENT_USER, path, registry.QUERY_VALUE)
 	if err != nil {
-		return "", false
+		if errors.Is(err, registry.ErrNotExist) {
+			return "", nil
+		}
+		return "", err
 	}
 	defer k.Close()
 	v, _, err := k.GetStringValue(name)
 	if err != nil {
-		return "", false
+		if errors.Is(err, registry.ErrNotExist) {
+			return "", nil
+		}
+		return "", err
 	}
-	return v, true
+	return v, nil
 }
 
 // exeFromCommand extracts the executable from a shell\open\command string. A
@@ -224,10 +241,12 @@ func exeFromCommand(cmd string) string {
 	return exe
 }
 
-// fileExists reports whether path resolves to an existing filesystem entry.
+// fileExists reports whether path resolves to an existing regular file. A
+// leftover install *directory* (binary removed but folder intact) must still
+// count as a stale handler, since the shell command can no longer launch it.
 func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 // SetAutostart toggles the login autostart Run value (§7). When enabled it

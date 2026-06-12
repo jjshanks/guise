@@ -133,7 +133,7 @@ HKCU\SOFTWARE\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserCho
 Windows 11 keeps **two** handler records per scheme: the long-standing `UserChoice`, and a
 newer, UCPD-protected `UserChoiceLatest` beside it:
 
-```
+```text
 HKCU\SOFTWARE\Microsoft\Windows\Shell\Associations\UrlAssociations\<scheme>\UserChoice
 HKCU\SOFTWARE\Microsoft\Windows\Shell\Associations\UrlAssociations\<scheme>\UserChoiceLatest
 ```
