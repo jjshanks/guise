@@ -216,6 +216,63 @@ func TestRouteDelayedRewriteWouldHaveBrokenMatch(t *testing.T) {
 	}
 }
 
+func TestResolveDropsMissingProfileSoPreviewMatchesRoute(t *testing.T) {
+	// Resolve is what the editor preview calls; it must apply the same
+	// invalid/missing-profile fallback as Route so a vanished profile previews as
+	// Chrome default instead of a phantom hit.
+	h := newRouteHarness(t)
+	h.writeLocalState(t, `{"profile":{"info_cache":{"Default":{"name":"P"}}}}`)
+
+	cfg := &config.Config{Version: 1, Rules: []config.Rule{
+		{ID: "r", Enabled: true, Pattern: `x\.com`, ProfileDirectory: "Profile 7"}, // not in Local State
+	}}
+	got := Resolve(cfg, "https://x.com/foo")
+	if got.Rule == nil || got.Rule.ID != "r" {
+		t.Fatalf("expected rule r to match, got %+v", got.Rule)
+	}
+	if !got.ProfileDropped || got.ProfileDirectory != "" {
+		t.Errorf("missing profile should drop to Chrome default: dropped=%v dir=%q", got.ProfileDropped, got.ProfileDirectory)
+	}
+}
+
+func TestResolveKeepsExistingProfile(t *testing.T) {
+	h := newRouteHarness(t)
+	h.writeLocalState(t, `{"profile":{"info_cache":{"Profile 1":{"name":"Work"}}}}`)
+
+	cfg := &config.Config{Version: 1, Rules: []config.Rule{
+		{ID: "r", Enabled: true, Pattern: `x\.com`, ProfileDirectory: "Profile 1"},
+	}}
+	got := Resolve(cfg, "https://x.com/foo")
+	if got.ProfileDropped || got.ProfileDirectory != "Profile 1" {
+		t.Errorf("existing profile should be kept: dropped=%v dir=%q", got.ProfileDropped, got.ProfileDirectory)
+	}
+}
+
+func TestResolveAppliesRewritesAroundMatch(t *testing.T) {
+	h := newRouteHarness(t)
+	h.writeLocalState(t, `{"profile":{"info_cache":{"Profile 1":{"name":"Work"}}}}`)
+
+	cfg := &config.Config{
+		Version: 1,
+		Rules:   []config.Rule{{ID: "r", Enabled: true, Pattern: `x\.com`, ProfileDirectory: "Profile 1"}},
+		Rewrites: []config.Rewrite{
+			{ID: "late", Enabled: true, Find: "x.com", Replace: "xcancel.com", Delayed: true},
+		},
+	}
+	got := Resolve(cfg, "https://x.com/foo")
+	// Matched on the original host (delayed rewrite runs after the match)...
+	if got.Rule == nil || got.ProfileDirectory != "Profile 1" {
+		t.Fatalf("delayed rewrite should not affect the match: %+v", got)
+	}
+	// ...but the final URL is rewritten, and the applied list records it.
+	if got.URL != "https://xcancel.com/foo" {
+		t.Errorf("final URL = %q, want rewritten", got.URL)
+	}
+	if len(got.Applied) != 1 || got.Applied[0] != "late" {
+		t.Errorf("applied = %v, want [late]", got.Applied)
+	}
+}
+
 func TestLaunchArgs(t *testing.T) {
 	tests := []struct {
 		name       string

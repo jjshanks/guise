@@ -86,9 +86,11 @@ func Path() string {
 }
 
 // Default returns an empty but valid configuration. With no rules, every URL
-// routes to Chrome's default behavior (no --profile-directory flag).
+// routes to Chrome's default behavior (no --profile-directory flag). Both slices
+// are non-nil so a fresh install (missing config) matches a loaded one — Load
+// normalizes the same way — and callers never see nil.
 func Default() *Config {
-	return &Config{Version: SchemaVersion, Rules: []Rule{}}
+	return &Config{Version: SchemaVersion, Rules: []Rule{}, Rewrites: []Rewrite{}}
 }
 
 // Load reads and parses config.json. A missing file is not an error: it yields

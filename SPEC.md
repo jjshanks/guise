@@ -47,10 +47,12 @@ All registry writes target `HKEY_CURRENT_USER` (see §3), so **no mode ever need
                         ┌──────────────────────────┐
                         │  ROUTE mode               │
                         │  1. load config           │
-                        │  2. regex match (ordered) │
-                        │  3. resolve profile        │
-                        │  4. exec chrome.exe        │
-                        │  5. exit immediately       │
+                        │  2. pre-rewrites (§15)    │
+                        │  3. regex match (ordered) │
+                        │  4. resolve profile        │
+                        │  5. delayed rewrites (§15)│
+                        │  6. exec chrome.exe        │
+                        │  7. exit immediately       │
                         └─────────────┬────────────┘
                                       │ chrome.exe --profile-directory="Profile 3" <url>
                                       ▼
@@ -357,8 +359,15 @@ Pseudo-Go for the part everything else orbits around:
 func route(url string) error {
     cfg := loadConfigOrLastGood()       // never fatal
 
-    profileDir := ""                    // "" means: no --profile-directory flag
+    original := url                     // the URL as clicked
     rule := "default"                   // matched rule id, or "default" on no match
+
+    // Pre-rewrites run before matching (§15): both the match and the launched URL
+    // see the rewritten string. applyRewrites is a literal find/replace over the
+    // enabled rewrites whose `delayed` flag is false; an empty list is a no-op.
+    url, _ = applyRewrites(cfg.Rewrites, url, false /*delayed*/)
+
+    profileDir := ""                    // "" means: no --profile-directory flag
     for _, r := range cfg.Rules {
         if !r.Enabled {
             continue
@@ -373,6 +382,11 @@ func route(url string) error {
             break
         }
     }
+    // A vanished or syntactically invalid profile falls back to Chrome default (§10).
+
+    // Delayed rewrites run after matching (§15): they change the launched URL
+    // without affecting which profile was chosen.
+    url, rewrites := applyRewrites(cfg.Rewrites, url, true /*delayed*/)
 
     chrome := resolveChromePath(cfg)     // §4.3
     var args []string
@@ -383,13 +397,15 @@ func route(url string) error {
         args = append(args, url)
     }
     err := exec.Command(chrome, args...).Start() // Start, not Run — don't wait
-    // One consolidated line per click (§9): which rule won, where it routed.
-    log.Printf("routed url=%q rule=%q profile=%q chrome=%q", url, rule, profileDir, chrome)
+    // One consolidated line per click (§9): which rule won, where it routed, and
+    // the final URL plus the rewrites that produced it.
+    log.Printf("routed url=%q final=%q rule=%q profile=%q rewrites=%v chrome=%q",
+        original, url, rule, profileDir, rewrites, chrome)
     return err
 }
 ```
 
-Two things this encodes: the no-match path deliberately leaves `profileDir` empty so the `--profile-directory` flag is *omitted entirely* (Chrome's default behavior), and `exec.Command(...).Start()` (not `Run()`) fires Chrome and lets ROUTE mode exit immediately rather than lingering as Chrome's parent.
+In the real code (`internal/router`) the pre-rewrite → match → fallback → delayed-rewrite sequence is a single pure function, `Resolve`, that both `Route` and the editor's "Test URL" preview call, so the preview can never drift from a real click. Three things this encodes: the no-match path deliberately leaves `profileDir` empty so the `--profile-directory` flag is *omitted entirely* (Chrome's default behavior); rewrites (§15) bracket the match — non-delayed before, delayed after; and `exec.Command(...).Start()` (not `Run()`) fires Chrome and lets ROUTE mode exit immediately rather than lingering as Chrome's parent.
 
 ---
 

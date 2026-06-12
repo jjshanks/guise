@@ -486,10 +486,11 @@ func (w *window) onMove(delta int) {
 }
 
 // onTest reports how the typed URL routes, without launching, and selects the
-// winning rule row (§6.2). It mirrors ROUTE order (§15): apply pre-rewrites,
-// match, then apply delayed rewrites, so the preview reflects both rewrites and
-// rules exactly as a real click would. Pending edits on both detail panes are
-// flushed first so the test sees what's on screen.
+// winning rule row (§6.2). It delegates to router.Resolve so the preview runs
+// the exact ROUTE pipeline — pre-rewrites, match, profile fallback, delayed
+// rewrites (§15) — and can never drift from a real click (e.g. a vanished
+// profile previews as Chrome default, just as it would route). Pending edits on
+// both detail panes are flushed first so the test sees what's on screen.
 func (w *window) onTest() {
 	w.writeBack()
 	w.writeBackRewrite()
@@ -498,24 +499,27 @@ func (w *window) onTest() {
 		w.testResult.SetText("type a URL to see how it routes")
 		return
 	}
-	routeURL, _ := router.ApplyRewrites(w.cfg.Rewrites, url, false)
-	res := router.Match(w.cfg, routeURL)
-	finalURL, _ := router.ApplyRewrites(w.cfg.Rewrites, routeURL, true)
+	r := router.Resolve(w.cfg, url)
 
-	profile := "Chrome default"
-	if res.Matched {
-		profile = w.friendlyName(res.ProfileDirectory)
+	// Clear any stale highlight first; only a real match re-selects a row below.
+	w.tv.SetCurrentIndex(-1)
+	if r.Rule != nil {
 		for i := range w.cfg.Rules {
-			if &w.cfg.Rules[i] == res.Rule {
+			if &w.cfg.Rules[i] == r.Rule {
 				w.tv.SetCurrentIndex(i)
 				break
 			}
 		}
 	}
-	msg := "→ " + profile
-	if finalURL != url {
+
+	msg := "→ " + w.friendlyName(r.ProfileDirectory)
+	if r.ProfileDropped {
+		// The rule matched but its profile is gone, so the real click falls back.
+		msg += " (rule matched but its profile is missing)"
+	}
+	if r.URL != url {
 		// A rewrite changed the URL; show what Chrome would actually open.
-		msg += fmt.Sprintf("  (opens %s)", finalURL)
+		msg += fmt.Sprintf("  (opens %s)", r.URL)
 	}
 	w.testResult.SetText(msg)
 }
