@@ -333,9 +333,20 @@ func (w *window) build() error {
 	w.populate()        // Clears the rule detail pane (nothing selected yet).
 	w.populateRewrite() // Same for the rewrite detail pane.
 
+	// Test seam: a GUI test sets afterBuild to drive the live widgets on the GUI
+	// thread (via Synchronize) and then close the window. nil in normal use.
+	if afterBuild != nil {
+		w.mw.Synchronize(func() { afterBuild(w) })
+	}
+
 	w.mw.Run()
 	return nil
 }
+
+// afterBuild, when non-nil, is invoked once on the GUI thread right after the
+// editor window is built (see build). It exists only so a Windows GUI test can
+// exercise the real walk widgets; production code never sets it.
+var afterBuild func(*window)
 
 // friendlyName maps a profile directory to its display name for the table.
 func (w *window) friendlyName(dir string) string {
@@ -456,8 +467,11 @@ func (w *window) validatePattern(pattern string) {
 func (w *window) onAdd() {
 	w.cfg.Rules = append(w.cfg.Rules, config.Rule{ID: genID(), Enabled: true})
 	w.model.PublishRowsReset()
-	idx := len(w.cfg.Rules) - 1
-	w.tv.SetCurrentIndex(idx)
+	// Set the selection explicitly (see onAddRewrite) so detail edits write back
+	// even if the table's OnCurrentIndexChanged event does not fire.
+	w.current = len(w.cfg.Rules) - 1
+	w.tv.SetCurrentIndex(w.current)
+	w.populate()
 }
 
 func (w *window) onDelete() {
@@ -482,7 +496,9 @@ func (w *window) onMove(delta int) {
 	}
 	w.cfg.Rules[i], w.cfg.Rules[j] = w.cfg.Rules[j], w.cfg.Rules[i]
 	w.model.PublishRowsReset()
+	w.current = j
 	w.tv.SetCurrentIndex(j)
+	w.populate()
 }
 
 // onTest reports how the typed URL routes, without launching, and selects the
@@ -587,7 +603,14 @@ func (w *window) validateFind(find string) {
 func (w *window) onAddRewrite() {
 	w.cfg.Rewrites = append(w.cfg.Rewrites, config.Rewrite{ID: genID(), Enabled: true})
 	w.rwModel.PublishRowsReset()
-	w.rwTV.SetCurrentIndex(len(w.cfg.Rewrites) - 1)
+	// Track the selection ourselves rather than trusting the table's
+	// OnCurrentIndexChanged event: walk's SetCurrentIndex can fail silently for a
+	// table on a not-yet-realized tab, leaving rwCurrent at -1 so writeBackRewrite
+	// drops every keystroke (the rewrite then saves with empty find/replace). Set
+	// rwCurrent explicitly and populate, so editing works regardless of the event.
+	w.rwCurrent = len(w.cfg.Rewrites) - 1
+	w.rwTV.SetCurrentIndex(w.rwCurrent)
+	w.populateRewrite()
 }
 
 func (w *window) onDeleteRewrite() {
@@ -612,7 +635,9 @@ func (w *window) onMoveRewrite(delta int) {
 	}
 	w.cfg.Rewrites[i], w.cfg.Rewrites[j] = w.cfg.Rewrites[j], w.cfg.Rewrites[i]
 	w.rwModel.PublishRowsReset()
+	w.rwCurrent = j
 	w.rwTV.SetCurrentIndex(j)
+	w.populateRewrite()
 }
 
 func (w *window) onAutoDetect() {
@@ -633,6 +658,10 @@ func (w *window) onBrowse() {
 }
 
 func (w *window) onSave() {
+	// Flush whatever is on screen for the selected rule/rewrite before saving, in
+	// case a pending edit has not been written back yet (belt and suspenders).
+	w.writeBack()
+	w.writeBackRewrite()
 	w.cfg.ChromePath = w.chromePath.Text()
 	if err := config.Save(w.cfg); err != nil {
 		walk.MsgBox(w.mw, "Save failed", err.Error(), walk.MsgBoxIconError)
