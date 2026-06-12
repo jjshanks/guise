@@ -128,6 +128,32 @@ HKCU\SOFTWARE\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserCho
 
 (The `UserChoice\Hash` value is intentionally tamper-protected by Windows; do **not** attempt to forge it. Read `ProgId` only to *detect* state, never to *set* it.)
 
+### 3.4 Stale ProgIDs and `UserChoiceLatest`
+
+Windows 11 keeps **two** handler records per scheme: the long-standing `UserChoice`, and a
+newer, UCPD-protected `UserChoiceLatest` beside it:
+
+```
+HKCU\SOFTWARE\Microsoft\Windows\Shell\Associations\UrlAssociations\<scheme>\UserChoice
+HKCU\SOFTWARE\Microsoft\Windows\Shell\Associations\UrlAssociations\<scheme>\UserChoiceLatest
+```
+
+After certain updates (e.g. a Patch Tuesday reboot) Windows can begin resolving clicks via
+`UserChoiceLatest` instead of `UserChoice`. If an **earlier** registration of this tool — under a
+different name, e.g. `URLRouterHTML` from before the urlrouter→guise rename — is still named there,
+and that ProgID's `shell\open\command` points at a binary that has since been deleted, every click
+dead-ends with "Application not found" **before guise is ever invoked** (so nothing appears in
+`guise.log`). Apps **cannot** write `UserChoiceLatest` (UCPD-protected, like `UserChoice\Hash`), so
+the only self-service remedy is to repair the *ProgID's class*.
+
+**Spec requirement:** `--register` and tray startup run a repair pass (`winreg.RepairStaleDefaults`)
+that, for `http` and `https`, reads the ProgID named by both `UserChoice` and `UserChoiceLatest`,
+and for any non-`GuiseHTML` ProgID whose `HKCU\SOFTWARE\Classes\<ProgID>\shell\open\command` points
+at a missing exe, rewrites that command to launch the current `guise.exe` — turning the stale ProgID
+into a working alias. It is scoped to ProgIDs that already have an HKCU class command, so
+system-managed ProgIDs in HKLM (`ChromeHTML`, `MSEdgeHTM`) are never hijacked, and it fails soft
+(per-ProgID errors are logged and skipped — never block registration or routing).
+
 ---
 
 ## 4. Chrome profile resolution

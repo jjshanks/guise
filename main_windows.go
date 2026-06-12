@@ -103,6 +103,12 @@ func register(exe string) int {
 	}
 	log.Printf("registered exe=%q", exe)
 
+	// Re-point any stale ProgIDs from earlier installs at this exe so a
+	// UserChoiceLatest still naming them doesn't dead-end clicks (#8, §3.3).
+	if repaired := winreg.RepairStaleDefaults(exe); len(repaired) > 0 {
+		log.Printf("repaired stale ProgIDs: %v", repaired)
+	}
+
 	msg := "Guise is now registered as an available browser.\n\n"
 	if isDef, _ := winreg.IsDefault(); isDef {
 		msg += "It is already your default browser."
