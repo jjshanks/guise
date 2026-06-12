@@ -250,7 +250,7 @@ func onReady(exe string) {
 	// Live default-browser indicator (§6.1): poll so it reflects changes the
 	// user makes in Settings without restarting the tray.
 	refreshDefault := func() {
-		switch isDef, err := winreg.IsDefault(); {
+		switch isDef, err := winreg.IsDefault(exe); {
 		case err != nil:
 			mDefault.SetTitle("Default browser: unknown")
 			mDefault.Uncheck()
@@ -300,7 +300,7 @@ func onReady(exe string) {
 		for {
 			select {
 			case <-mDefault.ClickedCh:
-				if isDef, _ := winreg.IsDefault(); !isDef {
+				if isDef, _ := winreg.IsDefault(exe); !isDef {
 					if err := winutil.ShellOpen("ms-settings:defaultapps"); err != nil {
 						log.Printf("open default apps settings: %v", err)
 					}

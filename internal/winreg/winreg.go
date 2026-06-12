@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"golang.org/x/sys/windows/registry"
@@ -32,10 +33,11 @@ const (
 
 	// assocBase is the per-scheme root Windows uses to record the chosen URL
 	// handler (§3.3). Each scheme has a UserChoice and a newer, UCPD-protected
-	// UserChoiceLatest beneath it; userChoiceKey is the https UserChoice that
-	// IsDefault reads.
-	assocBase     = `SOFTWARE\Microsoft\Windows\Shell\Associations\UrlAssociations\`
-	userChoiceKey = assocBase + `https\UserChoice`
+	// UserChoiceLatest beneath it. Windows 11 24H2+ resolves clicks through
+	// UserChoiceLatest preferentially, so IsDefault reads both https keys (#9).
+	assocBase           = `SOFTWARE\Microsoft\Windows\Shell\Associations\UrlAssociations\`
+	userChoiceKey       = assocBase + `https\UserChoice`
+	userChoiceLatestKey = assocBase + `https\UserChoiceLatest`
 )
 
 // command builds the shell open command: "<exe>" "%1". Windows substitutes the
@@ -100,25 +102,60 @@ func Unregister() error {
 	return nil
 }
 
-// IsDefault reports whether guise is the current https handler, by reading
-// the UserChoice ProgId (§3.3). We only ever read this value to detect state;
-// the tamper-protected Hash means it can never be written here to force the
-// default. A missing key simply means we are not the default.
-func IsDefault() (bool, error) {
-	k, err := registry.OpenKey(registry.CURRENT_USER, userChoiceKey, registry.QUERY_VALUE)
-	if errors.Is(err, registry.ErrNotExist) {
-		return false, nil
-	}
+// IsDefault reports whether guise is the current https handler (§3.3, §3.4).
+// Windows 11 24H2+ keeps two records per scheme — UserChoice and the newer,
+// UCPD-protected UserChoiceLatest — and resolves clicks through UserChoiceLatest
+// preferentially. Reading UserChoice alone gave a false healthy signal when
+// UserChoiceLatest named a stale ProgID pointing at a deleted exe (#9), so we
+// judge both: guise is default only if every populated key names a ProgID whose
+// HKCU class command resolves to the current exe. We only ever read these values
+// to detect state; the tamper-protected Hash means the default can never be
+// forced here. A missing key simply means it does not constrain the verdict.
+func IsDefault(exe string) (bool, error) {
+	uc, err := readString(userChoiceKey, "ProgId")
 	if err != nil {
-		return false, fmt.Errorf("opening UserChoice: %w", err)
+		return false, fmt.Errorf("reading UserChoice ProgId: %w", err)
 	}
-	defer k.Close()
+	latest, err := readString(userChoiceLatestKey, "ProgId")
+	if err != nil {
+		return false, fmt.Errorf("reading UserChoiceLatest ProgId: %w", err)
+	}
+	return decideDefault(exe, uc, latest, handlerExe), nil
+}
 
-	got, _, err := k.GetStringValue("ProgId")
-	if err != nil {
-		return false, fmt.Errorf("reading ProgId: %w", err)
+// decideDefault is the pure verdict behind IsDefault, split out from registry
+// I/O so it is testable without HKCU (like repairProgIDs). resolve maps a ProgID
+// to the exe its HKCU class command would launch (""=unresolvable). guise is
+// default iff UserChoice resolves to exe and UserChoiceLatest, when present,
+// also resolves to exe — so a stale ProgID in either slot fails the check.
+func decideDefault(exe, ucProgID, latestProgID string, resolve func(string) string) bool {
+	is := func(pid string) bool { return pid != "" && samePath(resolve(pid), exe) }
+	if !is(ucProgID) {
+		return false
 	}
-	return got == progID, nil
+	return latestProgID == "" || is(latestProgID)
+}
+
+// handlerExe returns the exe that progID's HKCU class shell\open\command would
+// launch, or "" if no such command exists or it cannot be parsed. It is the
+// real resolver passed to decideDefault, and mirrors how repairProgIDs reads a
+// ProgID's class command.
+func handlerExe(progID string) string {
+	cmd, err := readString(classesKey+`\`+progID+`\shell\open\command`, "")
+	if err != nil || cmd == "" {
+		return ""
+	}
+	return exeFromCommand(cmd)
+}
+
+// samePath reports whether two filesystem paths refer to the same file, modulo
+// Windows path casing and separator/cleanup differences. An empty path never
+// matches, so an unresolvable handler is never mistaken for the current exe.
+func samePath(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
 }
 
 // RepairStaleDefaults re-points stale ProgIDs left by earlier registrations of

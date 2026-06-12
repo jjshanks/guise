@@ -110,7 +110,7 @@ func register(exe string) int {
 	}
 
 	msg := "Guise is now registered as an available browser.\n\n"
-	if isDef, _ := winreg.IsDefault(); isDef {
+	if isDef, _ := winreg.IsDefault(exe); isDef {
 		msg += "It is already your default browser."
 	} else {
 		// Windows 11 forbids silent default changes (§3.3); guide the user.

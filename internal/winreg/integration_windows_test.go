@@ -106,3 +106,48 @@ func TestRepairProgIDsRoundTrip(t *testing.T) {
 		t.Errorf("live command = %q, want unchanged %q", got, command(self))
 	}
 }
+
+// TestHandlerExeRoundTrip verifies the resolver behind IsDefault (#9) against
+// real HKCU classes: a seeded ProgID's shell\open\command parses back to its
+// exe, and samePath then matches the current exe against it. An absent ProgID
+// resolves to "" (never the current exe). It seeds only HKCU\Classes keys — not
+// the UCPD-protected UserChoice keys — so it is safe to run, and is gated behind
+// GUISE_REGISTRY_IT=1 like the other round-trips.
+func TestHandlerExeRoundTrip(t *testing.T) {
+	if os.Getenv("GUISE_REGISTRY_IT") != "1" {
+		t.Skip("set GUISE_REGISTRY_IT=1 to run the registry integration test")
+	}
+	const pid = "GuiseITDefaultHTML"
+	cmdKey := classesKey + `\` + pid + `\shell\open\command`
+	t.Cleanup(func() {
+		for _, p := range []string{
+			cmdKey, classesKey + `\` + pid + `\shell\open`, classesKey + `\` + pid + `\shell`, classesKey + `\` + pid,
+		} {
+			registry.DeleteKey(registry.CURRENT_USER, p)
+		}
+	})
+
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	if err := setString(cmdKey, "", command(self)); err != nil {
+		t.Fatalf("seed command: %v", err)
+	}
+
+	if got := handlerExe(pid); !samePath(got, self) {
+		t.Errorf("handlerExe(%q) = %q, want samePath with %q", pid, got, self)
+	}
+	if got := handlerExe("GuiseITAbsentHTML"); got != "" {
+		t.Errorf("handlerExe(absent) = %q, want \"\"", got)
+	}
+
+	// End-to-end: decideDefault with the real resolver treats this ProgID as
+	// default in either slot.
+	if !decideDefault(self, pid, pid, handlerExe) {
+		t.Errorf("decideDefault with seeded ProgID in both slots = false, want true")
+	}
+	if !decideDefault(self, pid, "", handlerExe) {
+		t.Errorf("decideDefault with seeded UserChoice only = false, want true")
+	}
+}
