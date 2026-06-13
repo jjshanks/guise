@@ -6,7 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `guise` is a Windows 11 app that registers itself as the default web browser and routes each
 clicked URL to a specific Chrome profile by ordered regex rule (first match wins; no match → launch
-Chrome with no `--profile-directory` flag). One binary, three modes, plus a system-tray rule editor.
+Chrome with no `--profile-directory` flag), optionally in an incognito window. URLs can also be
+rewritten by literal find/replace before launch (§15). One binary, three modes, plus a system-tray
+rule editor.
 
 `SPEC.md` is the authoritative design document — it is detailed and section-numbered (§N), and the
 code comments reference those section numbers. When a design question comes up, read the relevant
@@ -63,9 +65,17 @@ Two design invariants that explain the whole system — do not break them withou
   `chrome.exe` stops routing (with a notification). Preserve this defensiveness when editing
   `internal/router` and `internal/config`.
 
-**Matching semantics (`internal/router`):** Go RE2 regex (`regexp` package — no backreferences),
-matched **unanchored** against the full URL string, **case-sensitive** by default. `Start()` not
-`Run()` so ROUTE exits without waiting on Chrome.
+**Routing pipeline (`internal/router`):** ROUTE and the editor's "Test URL" preview share one
+function, `Resolve` — so the preview can never drift from a real click. It runs, in order:
+pre-rewrites → rule match → profile validate/fallback → delayed rewrites, then launches with the
+profile flag and (if the matched rule opts in) `--incognito`.
+- **Matching:** Go RE2 regex (`regexp` package — no backreferences), **unanchored** against the
+  full URL, **case-sensitive** by default. `Start()` not `Run()` so ROUTE exits without waiting.
+- **Rewrites (§15):** literal find/replace, all enabled ones applied in order (not first-match).
+  Non-delayed rewrites run *before* matching (profile + launched URL both see the result); delayed
+  ones run *after*, changing the launched URL without affecting which profile is chosen.
+- **Incognito:** a per-rule flag; independent of profile fallback (a vanished profile still
+  launches `--incognito`).
 
 ## Platform-split convention
 
