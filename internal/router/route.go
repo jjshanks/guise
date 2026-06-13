@@ -33,6 +33,7 @@ type Resolution struct {
 	Rule             *config.Rule // The matched rule, or nil on no match.
 	ProfileDirectory string       // Profile dir after fallback ("" = Chrome default).
 	ProfileDropped   bool         // True when a matched profile was invalid/missing and fell back.
+	Incognito        bool         // True when the matched rule opts into an incognito window.
 	Applied          []string     // IDs of the rewrites that changed the URL, in order.
 }
 
@@ -71,7 +72,11 @@ func Resolve(cfg *config.Config, url string) Resolution {
 		Rule:             res.Rule,
 		ProfileDirectory: profileDir,
 		ProfileDropped:   dropped,
-		Applied:          append(preApplied, postApplied...),
+		// Incognito is independent of the profile fallback: a matched rule still
+		// opens a private window even if its profile vanished and dropped to
+		// Chrome default.
+		Incognito: res.Rule != nil && res.Rule.Incognito,
+		Applied:   append(preApplied, postApplied...),
 	}
 }
 
@@ -113,28 +118,32 @@ func Route(url string) error {
 		return fmt.Errorf("resolving chrome: %w", err)
 	}
 
-	args := launchArgs(r.ProfileDirectory, r.URL)
+	args := launchArgs(r.ProfileDirectory, r.Incognito, r.URL)
 	if err := startProcess(chromePath, args...); err != nil {
-		log.Printf("launch failed url=%q final=%q rule=%q profile=%q rewrites=%v chrome=%q: %v", r.Original, r.URL, rule, r.ProfileDirectory, r.Applied, chromePath, err)
+		log.Printf("launch failed url=%q final=%q rule=%q profile=%q incognito=%v rewrites=%v chrome=%q: %v", r.Original, r.URL, rule, r.ProfileDirectory, r.Incognito, r.Applied, chromePath, err)
 		notifyError("Guise", "Failed to launch Chrome:\n"+err.Error())
 		return fmt.Errorf("launching chrome: %w", err)
 	}
 	// One consolidated line per click (§9). final= and rewrites= are included so a
 	// URL the rewrites changed is debuggable; for the common no-rewrite case final
 	// equals url and rewrites is empty.
-	log.Printf("routed url=%q final=%q rule=%q profile=%q rewrites=%v chrome=%q", r.Original, r.URL, rule, r.ProfileDirectory, r.Applied, chromePath)
+	log.Printf("routed url=%q final=%q rule=%q profile=%q incognito=%v rewrites=%v chrome=%q", r.Original, r.URL, rule, r.ProfileDirectory, r.Incognito, r.Applied, chromePath)
 	return nil
 }
 
 // launchArgs builds the chrome.exe argument list. An empty profileDir omits
-// the --profile-directory flag entirely (no-match → Chrome default), and an
-// empty url launches Chrome with no URL (§10: no-argument ROUTE mode). The URL
-// is always passed as a distinct argv entry, never a shell string, so weird
-// URLs survive without quoting injection (§10).
-func launchArgs(profileDir, url string) []string {
+// the --profile-directory flag entirely (no-match → Chrome default), incognito
+// appends --incognito (combined with the profile flag it opens an incognito
+// window for that profile), and an empty url launches Chrome with no URL (§10:
+// no-argument ROUTE mode). Every value is a distinct argv entry, never a shell
+// string, so weird URLs and flags survive without quoting injection (§10).
+func launchArgs(profileDir string, incognito bool, url string) []string {
 	var args []string
 	if profileDir != "" {
 		args = append(args, "--profile-directory="+profileDir)
+	}
+	if incognito {
+		args = append(args, "--incognito")
 	}
 	if url != "" {
 		args = append(args, url)
