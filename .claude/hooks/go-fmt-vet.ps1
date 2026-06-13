@@ -23,17 +23,33 @@ try {
     if (-not $filePath.EndsWith('.go')) { return }
     if (-not (Test-Path -LiteralPath $filePath -PathType Leaf)) { return }
 
+    # Resolve go/gofmt to ABSOLUTE paths up front (before any Push-Location).
+    # cmd.exe searches the current directory first for an unqualified name, so a
+    # bare 'go'/'gofmt' could be hijacked by a malicious executable dropped into
+    # the edited file's package directory (e.g. an untrusted checkout). Prefer
+    # the standard install; otherwise Get-Command resolves via PATH — never CWD —
+    # and -CommandType Application excludes alias/function shadowing.
     $goExe = 'C:\Program Files\Go\bin\go.exe'
-    if (-not (Test-Path -LiteralPath $goExe)) { $goExe = 'go' }
+    if (-not (Test-Path -LiteralPath $goExe -PathType Leaf)) {
+        $goExe = (Get-Command go -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+    }
     $gofmtExe = 'C:\Program Files\Go\bin\gofmt.exe'
-    if (-not (Test-Path -LiteralPath $gofmtExe)) { $gofmtExe = 'gofmt' }
+    if (-not (Test-Path -LiteralPath $gofmtExe -PathType Leaf)) {
+        $gofmtExe = (Get-Command gofmt -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+    }
 
     # Format in place — best effort, never let gofmt block the edit.
-    try { & $gofmtExe -w -- $filePath 2>$null | Out-Null } catch {}
+    if ($gofmtExe) {
+        try { & $gofmtExe -w -- $filePath 2>$null | Out-Null } catch {}
+    }
 
     # Vet the package the file lives in. `go vet` writes findings to stderr; we
     # let cmd.exe merge stderr into stdout (2>&1) so PowerShell only ever sees
-    # plain text and never wraps it in NativeCommandError noise.
+    # plain text and never wraps it in NativeCommandError noise. $goExe is the
+    # absolute path resolved above, so the quoted command token gives cmd.exe no
+    # reason to perform a CWD-relative search.
+    if (-not $goExe) { return }
+
     $pkgDir = Split-Path -Parent $filePath
     if (-not $pkgDir) { $pkgDir = '.' }
 
