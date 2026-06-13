@@ -293,3 +293,15 @@ func IsNewer(current, latest string) bool {
 // oldPath is the name the running exe is moved aside to during Apply. It lives
 // here (not in apply_windows.go) so it is covered by the cross-platform tests.
 func oldPath(exe string) string { return exe + ".old" }
+
+// IsWingetManaged reports whether exe was installed by the Windows Package
+// Manager. winget's `portable` installer drops the binary under
+// %LOCALAPPDATA%\Microsoft\WinGet\Packages\<id>\, so the WinGet\Packages path
+// segment is a reliable signal. When true the §14 self-updater stands down and
+// defers to `winget upgrade`, since a rename-in-place swap would desync winget's
+// package tracking. Pure string logic (case-insensitive, slash-agnostic) so it
+// stays testable off-Windows per the platform-split convention.
+func IsWingetManaged(exe string) bool {
+	p := strings.ToLower(strings.ReplaceAll(exe, `\`, "/"))
+	return strings.Contains(p, "/winget/packages/")
+}

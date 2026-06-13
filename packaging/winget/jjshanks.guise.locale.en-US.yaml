@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
+PackageIdentifier: jjshanks.guise
+PackageVersion: 0.4.0
+PackageLocale: en-US
+Publisher: Joshua Shanks
+PublisherUrl: https://github.com/jjshanks
+PublisherSupportUrl: https://github.com/jjshanks/guise/issues
+Author: Joshua Shanks
+PackageName: guise
+PackageUrl: https://github.com/jjshanks/guise
+License: MIT
+LicenseUrl: https://github.com/jjshanks/guise/blob/main/LICENSE.md
+Copyright: Copyright (c) 2026 Joshua Shanks
+ShortDescription: Registers as the default browser and routes each clicked URL to a specific Chrome profile by regex rule.
+Description: |-
+  guise is a Windows 11 app that registers itself as the default web browser and
+  routes each clicked URL to a specific Chrome profile by ordered regex rule (first
+  match wins; no match launches Chrome normally). One binary, three modes, plus a
+  system-tray rule editor. Everything writes only to HKEY_CURRENT_USER, so nothing
+  ever needs admin rights.
+
+  After installing via winget, run guise once and use the tray to register it as an
+  eligible browser, then set it as the default in Settings > Apps > Default apps
+  (Windows 11 forbids automating that final step). The winget `portable` install does
+  not register it for you.
+
+  Note: guise has a built-in updater. When installed via winget it detects this and
+  defers to `winget upgrade jjshanks.guise` instead of self-updating, so use winget to
+  upgrade winget-managed copies.
+Moniker: guise
+Tags:
+  - browser
+  - chrome
+  - default-browser
+  - profile
+  - router
+  - url
+ReleaseNotesUrl: https://github.com/jjshanks/guise/releases/tag/v0.4.0
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0
