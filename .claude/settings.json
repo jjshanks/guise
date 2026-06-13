@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File .claude/hooks/go-fmt-vet.ps1",
+            "timeout": 120,
+            "statusMessage": "gofmt + go vet"
+          }
+        ]
+      }
+    ]
+  }
+}
