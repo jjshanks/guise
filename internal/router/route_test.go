@@ -93,6 +93,54 @@ func TestRouteMatchedExistingProfileLaunchesWithFlag(t *testing.T) {
 	}
 }
 
+func TestRouteIncognitoRuleAddsFlag(t *testing.T) {
+	// A matched rule with "incognito":true launches --incognito alongside the
+	// profile flag (ordered profile → incognito → url).
+	h := newRouteHarness(t)
+	h.writeConfig(t, `[{"id":"1","enabled":true,"pattern":"x\\.com","profile_directory":"Profile 1","incognito":true}]`)
+	h.writeLocalState(t, `{"profile":{"info_cache":{"Profile 1":{"name":"Work"}}}}`)
+
+	if err := Route("https://x.com/foo"); err != nil {
+		t.Fatalf("Route: %v", err)
+	}
+	want := []string{"--profile-directory=Profile 1", "--incognito", "https://x.com/foo"}
+	if !reflect.DeepEqual(h.gotArgs, want) {
+		t.Errorf("args = %v, want %v", h.gotArgs, want)
+	}
+}
+
+func TestRouteIncognitoNoProfile(t *testing.T) {
+	// Incognito with no profile is just --incognito <url>.
+	h := newRouteHarness(t)
+	h.writeConfig(t, `[{"id":"1","enabled":true,"pattern":"x\\.com","incognito":true}]`)
+
+	if err := Route("https://x.com/foo"); err != nil {
+		t.Fatalf("Route: %v", err)
+	}
+	want := []string{"--incognito", "https://x.com/foo"}
+	if !reflect.DeepEqual(h.gotArgs, want) {
+		t.Errorf("args = %v, want %v", h.gotArgs, want)
+	}
+}
+
+func TestResolveIncognitoSurvivesDroppedProfile(t *testing.T) {
+	// Incognito is independent of the profile fallback: a vanished profile drops to
+	// Chrome default but the rule still requests a private window.
+	h := newRouteHarness(t)
+	h.writeLocalState(t, `{"profile":{"info_cache":{"Default":{"name":"P"}}}}`)
+
+	cfg := &config.Config{Version: 1, Rules: []config.Rule{
+		{ID: "r", Enabled: true, Pattern: `x\.com`, ProfileDirectory: "Profile 7", Incognito: true}, // profile not in Local State
+	}}
+	got := Resolve(cfg, "https://x.com/foo")
+	if !got.ProfileDropped || got.ProfileDirectory != "" {
+		t.Errorf("missing profile should drop: dropped=%v dir=%q", got.ProfileDropped, got.ProfileDirectory)
+	}
+	if !got.Incognito {
+		t.Error("incognito should survive a dropped profile")
+	}
+}
+
 func TestRouteNoMatchOmitsFlag(t *testing.T) {
 	h := newRouteHarness(t)
 	h.writeConfig(t, `[{"id":"1","enabled":true,"pattern":"github\\.com","profile_directory":"Profile 1"}]`)
@@ -277,19 +325,24 @@ func TestLaunchArgs(t *testing.T) {
 	tests := []struct {
 		name       string
 		profileDir string
+		incognito  bool
 		url        string
 		want       []string
 	}{
-		{"profile and url", "Profile 3", "https://github.com/foo", []string{"--profile-directory=Profile 3", "https://github.com/foo"}},
-		{"no match keeps no flag", "", "https://github.com/bar", []string{"https://github.com/bar"}},
-		{"no url no profile", "", "", nil},
-		{"profile only no url", "Profile 1", "", []string{"--profile-directory=Profile 1"}},
+		{"profile and url", "Profile 3", false, "https://github.com/foo", []string{"--profile-directory=Profile 3", "https://github.com/foo"}},
+		{"no match keeps no flag", "", false, "https://github.com/bar", []string{"https://github.com/bar"}},
+		{"no url no profile", "", false, "", nil},
+		{"profile only no url", "Profile 1", false, "", []string{"--profile-directory=Profile 1"}},
+		// §10: --incognito is a distinct argv entry, ordered profile → incognito → url.
+		{"incognito with profile", "Profile 3", true, "https://x.com/foo", []string{"--profile-directory=Profile 3", "--incognito", "https://x.com/foo"}},
+		{"incognito no profile", "", true, "https://x.com/foo", []string{"--incognito", "https://x.com/foo"}},
+		{"incognito no url", "", true, "", []string{"--incognito"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := launchArgs(tt.profileDir, tt.url)
+			got := launchArgs(tt.profileDir, tt.incognito, tt.url)
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("launchArgs(%q, %q) = %v, want %v", tt.profileDir, tt.url, got, tt.want)
+				t.Errorf("launchArgs(%q, %v, %q) = %v, want %v", tt.profileDir, tt.incognito, tt.url, got, tt.want)
 			}
 		})
 	}

@@ -16,8 +16,9 @@ import (
 type Rule struct {
 	ID               string `json:"id"`
 	Enabled          bool   `json:"enabled"`
-	Pattern          string `json:"pattern"`           // Go RE2 pattern, matched unanchored.
-	ProfileDirectory string `json:"profile_directory"` // On-disk dir name, e.g. "Profile 3".
+	Pattern          string `json:"pattern"`             // Go RE2 pattern, matched unanchored.
+	ProfileDirectory string `json:"profile_directory"`   // On-disk dir name, e.g. "Profile 3".
+	Incognito        bool   `json:"incognito,omitempty"` // Open the matched URL in an incognito window. Omitempty + default-false keeps existing configs byte-identical.
 	Comment          string `json:"comment"`
 }
 

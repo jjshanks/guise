@@ -227,6 +227,7 @@ Resolution order (first found wins):
       "enabled": true,
       "pattern": "github\\.com/foo(/|$)",
       "profile_directory": "Profile 3",
+      "incognito": false,
       "comment": "GitHub foo org → foo profile"
     },
     {
@@ -254,6 +255,7 @@ Field notes:
 - `rules` order **is** evaluation order.
 - `pattern` is a Go `regexp` (RE2) pattern, matched **unanchored** against the full URL string (§5.3). RE2 has no backreferences — document this so users don't paste PCRE.
 - `profile_directory` stores the *directory* name (e.g. `Profile 3`); the editor shows the friendly name.
+- `incognito` opens the matched URL in a private window (`--incognito`). Combined with `profile_directory` it opens an incognito window for that profile; with no profile it is just `--incognito <url>`. It is independent of the profile fallback (a vanished profile still launches incognito). Omitted from the file when false, so existing configs are untouched.
 - `chrome_path` empty = auto-detect (§4.3).
 - There is no default-profile field. When no rule matches, Chrome launches with no profile flag (§5.3).
 - `rewrites` are literal find/replace URL transforms applied in list order; `delayed` controls whether a rewrite runs before (default) or after profile matching (§15).
@@ -303,7 +305,8 @@ A simple table-driven editor. Columns: `↑↓ (reorder) | Enabled | Pattern | P
 - "Add rule" button.
 - Chrome path field (with auto-detect + browse).
 - Live regex validation: invalid patterns flagged inline (compile with `regexp.Compile`).
-- A "Test URL" field at the top: type a URL and the matching row highlights (or it reports "no match → Chrome default"). Because matching is unanchored, this is the primary way to catch a pattern that's broader than intended.
+- An "Open in incognito" checkbox in the selected-rule detail pane: when set, a matched URL launches with `--incognito` (combined with the profile flag when a profile is chosen).
+- A "Test URL" field at the top: type a URL and the matching row highlights (or it reports "no match → Chrome default"). The preview shows `[incognito]` when the matched rule opts in, so it's visible before a real click. Because matching is unanchored, this is the primary way to catch a pattern that's broader than intended.
 - Save writes config.json atomically (write temp file in same dir, `os.Rename`).
 
 No default-profile control — the no-match case is fixed behavior (launch Chrome with no profile flag) and needs no configuration.
@@ -422,14 +425,17 @@ func route(url string) error {
     if profileDir != "" {
         args = append(args, "--profile-directory="+profileDir)
     }
+    if incognito {                               // matched rule's incognito flag (§5.2)
+        args = append(args, "--incognito")       // distinct argv entry; combines with profile
+    }
     if url != "" {
         args = append(args, url)
     }
     err := exec.Command(chrome, args...).Start() // Start, not Run — don't wait
     // One consolidated line per click (§9): which rule won, where it routed, and
     // the final URL plus the rewrites that produced it.
-    log.Printf("routed url=%q final=%q rule=%q profile=%q rewrites=%v chrome=%q",
-        original, url, rule, profileDir, rewrites, chrome)
+    log.Printf("routed url=%q final=%q rule=%q profile=%q incognito=%v rewrites=%v chrome=%q",
+        original, url, rule, profileDir, incognito, rewrites, chrome)
     return err
 }
 ```

@@ -93,16 +93,17 @@ type window struct {
 	model          *rulesModel
 	rwModel        *rewritesModel
 
-	tv         *walk.TableView
-	enabledCB  *walk.CheckBox
-	patternEd  *walk.LineEdit
-	patternErr *walk.Label
-	profileCB  *walk.ComboBox
-	commentEd  *walk.LineEdit
-	chromePath *walk.LineEdit
-	testEd     *walk.LineEdit
-	testResult *walk.Label
-	status     *walk.Label
+	tv          *walk.TableView
+	enabledCB   *walk.CheckBox
+	patternEd   *walk.LineEdit
+	patternErr  *walk.Label
+	profileCB   *walk.ComboBox
+	incognitoCB *walk.CheckBox
+	commentEd   *walk.LineEdit
+	chromePath  *walk.LineEdit
+	testEd      *walk.LineEdit
+	testResult  *walk.Label
+	status      *walk.Label
 
 	// Rewrite tab widgets (§15).
 	rwTV        *walk.TableView
@@ -231,6 +232,7 @@ func (w *window) build() error {
 									d.Label{AssignTo: &w.patternErr, Text: ""},
 									d.Label{Text: "Profile:"},
 									d.ComboBox{AssignTo: &w.profileCB, OnCurrentIndexChanged: w.writeBack},
+									d.CheckBox{AssignTo: &w.incognitoCB, Text: "Open in incognito", OnCheckedChanged: w.writeBack, ColumnSpan: 2},
 									d.Label{Text: "Comment:"},
 									d.LineEdit{AssignTo: &w.commentEd, OnTextChanged: w.writeBack},
 								},
@@ -419,6 +421,7 @@ func (w *window) populate() {
 		w.patternEd.SetText("")
 		w.commentEd.SetText("")
 		w.profileCB.SetCurrentIndex(0)
+		w.incognitoCB.SetChecked(false)
 		w.patternErr.SetText("")
 		return
 	}
@@ -427,6 +430,7 @@ func (w *window) populate() {
 	w.patternEd.SetText(r.Pattern)
 	w.commentEd.SetText(r.Comment)
 	w.profileCB.SetCurrentIndex(w.comboIndexForProfile(r.ProfileDirectory))
+	w.incognitoCB.SetChecked(r.Incognito)
 	w.validatePattern(r.Pattern)
 }
 
@@ -441,6 +445,7 @@ func (w *window) writeBack() {
 	r.Pattern = w.patternEd.Text()
 	r.Comment = w.commentEd.Text()
 	r.ProfileDirectory = w.profileForComboIndex(w.profileCB.CurrentIndex())
+	r.Incognito = w.incognitoCB.Checked()
 	w.model.PublishRowChanged(w.current)
 }
 
@@ -529,6 +534,10 @@ func (w *window) onTest() {
 	}
 
 	msg := "→ " + w.friendlyName(r.ProfileDirectory)
+	if r.Incognito {
+		// Reflect the incognito flag so it's visible before a real click (§6.2).
+		msg += " [incognito]"
+	}
 	if r.ProfileDropped {
 		// The rule matched but its profile is gone, so the real click falls back.
 		msg += " (rule matched but its profile is missing)"
