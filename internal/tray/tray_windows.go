@@ -202,6 +202,17 @@ func onReady(exe string) {
 			return
 		}
 
+		// A winget-installed copy is managed by the Windows Package Manager, so the
+		// in-app rename-in-place swap (§14.3) would desync winget's tracking. Defer
+		// to `winget upgrade` instead (issue #18).
+		if updater.IsWingetManaged(exe) {
+			log.Printf("update check skipped: winget-managed install (%s)", exe)
+			if manual {
+				notify.Info("Guise", "Guise was installed with winget.\n\nUpdate it by running:\n\n    winget upgrade jjshanks.guise")
+			}
+			return
+		}
+
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 

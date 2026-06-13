@@ -92,8 +92,28 @@ restarts the tray.
 
 ## Install
 
-No admin rights needed — everything writes to `HKEY_CURRENT_USER`. Run this in
-PowerShell:
+No installer or admin rights needed — everything writes to `HKEY_CURRENT_USER`.
+
+### With winget (recommended)
+
+```powershell
+winget install jjshanks.guise
+```
+
+This is a [portable](https://learn.microsoft.com/windows/package-manager/) install:
+it drops `guise.exe` and puts a `guise` command on your PATH, but it does **not**
+register guise as a browser. Finish setup once:
+
+1. Run `guise --register` (or open the tray with `guise --tray` and let it register).
+2. Run `guise --tray` and toggle **Start at login** in the tray menu.
+3. Windows 11 forbids silent default-browser changes, so set the default
+   yourself: **Settings → Apps → Default apps → Guise → Set default**
+   (the tray's "Default browser: No — click to fix" item deep-links there).
+
+winget-installed copies update through `winget upgrade jjshanks.guise` — the built-in
+updater detects the winget install and steps aside (see [SPEC §14](SPEC.md)).
+
+### With the install script
 
 ```powershell
 irm https://raw.githubusercontent.com/jjshanks/guise/main/scripts/install.ps1 | iex
@@ -128,6 +148,9 @@ If you'd rather not pipe a script, grab `guise.exe` from the
 3. Run `guise.exe --tray` and toggle **Start at login** in the tray menu.
 4. Set the default browser as in step 1 above.
 
+The install-script and manual paths keep themselves current via the in-app
+updater (§14); only the winget path defers updates to `winget upgrade`.
+
 ## Uninstall
 
 ```powershell
@@ -137,7 +160,8 @@ irm https://raw.githubusercontent.com/jjshanks/guise/main/scripts/uninstall.ps1 
 This unregisters guise, removes autostart, and deletes the install directory.
 Your rules and log under `%APPDATA%\Guise` are kept (the script prints how to
 remove them too). Or do it by hand: `guise.exe --unregister`, untoggle **Start
-at login**, then delete the install folder.
+at login**, then delete the install folder. (winget installs: `winget uninstall
+jjshanks.guise`, after `guise --unregister`.)
 
 ## Rules
 

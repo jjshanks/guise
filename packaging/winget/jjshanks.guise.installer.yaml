@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
+# guise ships as a single bare guise.exe (no MSI/installer), so this is a winget
+# `portable` package: winget drops the exe under %LOCALAPPDATA%\Microsoft\WinGet\Packages\
+# and a `guise` shim on its Links dir (PATH). Portable does NOT run guise --register,
+# so registering as the default browser stays a manual one-time step after install
+# (see packaging/winget/README.md and the project README). HKCU-only, no elevation.
+PackageIdentifier: jjshanks.guise
+PackageVersion: 0.4.0
+InstallerType: portable
+Commands:
+  - guise
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/jjshanks/guise/releases/download/v0.4.0/guise.exe
+    InstallerSha256: F78197417F14AC72A69AFD391C304CB6135B3D1AB95B39B3D7AE0F3FFBDEA105
+    PortableCommandAlias: guise
+ManifestType: installer
+ManifestVersion: 1.6.0

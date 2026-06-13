@@ -53,6 +53,30 @@ func TestIsReleaseBuild(t *testing.T) {
 	}
 }
 
+func TestIsWingetManaged(t *testing.T) {
+	managed := []string{
+		`C:\Users\me\AppData\Local\Microsoft\WinGet\Packages\jjshanks.guise_Microsoft.Winget.Source_8wekyb3d8bbwe\guise.exe`,
+		`C:\Users\me\AppData\Local\Microsoft\winget\packages\jjshanks.guise\guise.exe`, // lowercase
+		"/home/me/.local/Microsoft/WinGet/Packages/jjshanks.guise/guise.exe",           // forward slashes
+	}
+	for _, p := range managed {
+		if !IsWingetManaged(p) {
+			t.Errorf("IsWingetManaged(%q) = false, want true", p)
+		}
+	}
+	unmanaged := []string{
+		`C:\Users\me\AppData\Local\Programs\Guise\guise.exe`,
+		`D:\Apps\Guise\guise.exe`,
+		"guise.exe",
+		"",
+	}
+	for _, p := range unmanaged {
+		if IsWingetManaged(p) {
+			t.Errorf("IsWingetManaged(%q) = true, want false", p)
+		}
+	}
+}
+
 func TestParseSHA(t *testing.T) {
 	good := "abc123" + "0000000000000000000000000000000000000000000000000000000000"[:58]
 	if len(good) != 64 {

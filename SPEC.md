@@ -340,6 +340,7 @@ HKCU = no elevation. Only the **tray** autostarts; routing needs nothing residen
 - **Manifest:** embed an application manifest requesting `asInvoker` (run as the normal user — never elevate, since all registry writes are HKCU). Mark the app per-monitor-DPI-aware here too (§10). Bundle the manifest and tray icon via a `.syso` (`github.com/akavel/rsrc`) or `go:embed`.
 - **Icon:** embed a `.ico`; reference it in `DefaultIcon` and the tray.
 - **Install:** because nothing needs elevation, install can be trivial — drop `guise.exe` in `%LOCALAPPDATA%\Programs\Guise\` and run `guise.exe --register`, all as the normal user. An Inno Setup script is nice-to-have for the copy + register + autostart steps, but a plain "copy the exe, run `--register` once" is sufficient. No MSI, no UAC, no admin install required.
+- **winget:** guise is published to the Windows Package Manager as a **portable** package (`jjshanks.guise`), since it ships as a bare `.exe` rather than an MSI. winget drops the exe under `%LOCALAPPDATA%\Microsoft\WinGet\Packages\…` and a `guise` shim on its Links dir (PATH) — still HKCU-only, no elevation. The portable type does **not** run `--register`, so registering as the default browser stays the same manual one-time step as above. The manifests live in `packaging/winget/`; pushing a stable `v*` tag auto-opens a `microsoft/winget-pkgs` version-bump PR (`.github/workflows/winget.yml`, see `packaging/winget/README.md`). Never add an elevated/MSI install path.
 
 ---
 
@@ -487,6 +488,10 @@ If step 2 fails, step 1 is rolled back so the registered path always resolves to
 - **Toggle.** A `"auto_update"` config field (absent ⇒ enabled) backs a tray checkbox, "Check for updates automatically." A manual "Check for updates now…" item is always available regardless of the toggle and reports its outcome (up to date / downloaded / error / "development build").
 - **Cadence.** One check at tray startup, then every 24 h while running. Releases are infrequent, so this keeps API traffic negligible; GitHub's unauthenticated rate limit is far above what a daily check needs.
 - **Fail soft.** Like routing (§2), the update path never takes the tray down. Network errors, API failures, and checksum mismatches are logged (§9) and, for a *manual* check, shown to the user; a *background* check stays silent unless an update is actually ready. Only the explicit user-driven Apply step replaces the binary.
+
+### 14.5 winget-installed copies defer to `winget upgrade`
+
+When guise is installed through the Windows Package Manager (§8), the package — not guise — owns the binary's lifecycle, and a rename-in-place swap (§14.3) would desync winget's tracking. So a winget-managed copy **stands down** from self-updating: `updater.IsWingetManaged` detects the install by the `…\Microsoft\WinGet\Packages\…` segment in the running exe's path, and the tray's update check returns early before any API call or download — a *manual* check tells the user to run `winget upgrade jjshanks.guise`; a *background* check stays silent. The detection is pure path logic, so it lives in the cross-platform `internal/updater` (not a `_windows` file). A hand-installed copy is unaffected and keeps the §14.2 flow.
 
 ---
 
