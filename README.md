@@ -92,14 +92,52 @@ restarts the tray.
 
 ## Install
 
-No installer or admin rights needed:
+No admin rights needed — everything writes to `HKEY_CURRENT_USER`. Run this in
+PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/jjshanks/guise/main/scripts/install.ps1 | iex
+```
+
+It downloads the latest `guise.exe`, **verifies it against the release's
+published SHA-256**, installs it to `%LOCALAPPDATA%\Programs\Guise\`, registers
+it as an eligible browser, and launches the tray. Overrides (set before the
+pipe, since `iex` can't take parameters):
+
+```powershell
+# Pin a version instead of latest:
+$env:GUISE_VERSION='v1.2.3'; irm https://raw.githubusercontent.com/jjshanks/guise/main/scripts/install.ps1 | iex
+# Install elsewhere:
+$env:GUISE_INSTALL_DIR='D:\Apps\Guise'; irm https://raw.githubusercontent.com/jjshanks/guise/main/scripts/install.ps1 | iex
+```
+
+Two manual steps remain afterward (Windows 11 forbids automating them):
+
+1. Set the default browser: **Settings → Apps → Default apps → Guise → Set
+   default** (the tray's "Default browser: No — click to fix" item deep-links
+   there).
+2. Toggle **Start at login** in the tray menu to autostart guise.
+
+### Manual install
+
+If you'd rather not pipe a script, grab `guise.exe` from the
+[latest release](https://github.com/jjshanks/guise/releases/latest) and:
 
 1. Copy `guise.exe` to `%LOCALAPPDATA%\Programs\Guise\`.
 2. Run `guise.exe --register` once.
 3. Run `guise.exe --tray` and toggle **Start at login** in the tray menu.
-4. Windows 11 forbids silent default-browser changes, so set the default
-   yourself: **Settings → Apps → Default apps → Guise → Set default**
-   (the tray's "Default browser: No — click to fix" item deep-links there).
+4. Set the default browser as in step 1 above.
+
+## Uninstall
+
+```powershell
+irm https://raw.githubusercontent.com/jjshanks/guise/main/scripts/uninstall.ps1 | iex
+```
+
+This unregisters guise, removes autostart, and deletes the install directory.
+Your rules and log under `%APPDATA%\Guise` are kept (the script prints how to
+remove them too). Or do it by hand: `guise.exe --unregister`, untoggle **Start
+at login**, then delete the install folder.
 
 ## Rules
 
