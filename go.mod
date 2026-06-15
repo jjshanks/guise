@@ -5,7 +5,7 @@ go 1.26.3
 require (
 	github.com/getlantern/systray v1.2.2
 	github.com/lxn/walk v0.0.0-20210112085537-c389da54e794
-	golang.org/x/sys v0.45.0
+	golang.org/x/sys v0.46.0
 )
 
 require (
