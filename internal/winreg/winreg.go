@@ -38,6 +38,11 @@ const (
 	assocBase           = `SOFTWARE\Microsoft\Windows\Shell\Associations\UrlAssociations\`
 	userChoiceKey       = assocBase + `https\UserChoice`
 	userChoiceLatestKey = assocBase + `https\UserChoiceLatest`
+
+	// progIDValue is the value name Windows uses for the chosen ProgID under a
+	// UserChoice / UserChoiceLatest key — and also the name of the *subkey* newer
+	// Windows 11 builds nest it under (see readUCProgID, #29).
+	progIDValue = "ProgId"
 )
 
 // command builds the shell open command: "<exe>" "%1". Windows substitutes the
@@ -105,35 +110,50 @@ func Unregister() error {
 // IsDefault reports whether guise is the current https handler (§3.3, §3.4).
 // Windows 11 24H2+ keeps two records per scheme — UserChoice and the newer,
 // UCPD-protected UserChoiceLatest — and resolves clicks through UserChoiceLatest
-// preferentially. Reading UserChoice alone gave a false healthy signal when
-// UserChoiceLatest named a stale ProgID pointing at a deleted exe (#9), so we
-// judge both: guise is default only if every populated key names a ProgID whose
-// HKCU class command resolves to the current exe. We only ever read these values
-// to detect state; the tamper-protected Hash means the default can never be
-// forced here. A missing key simply means it does not constrain the verdict.
+// preferentially, so the verdict judges the authoritative ProgID: UserChoiceLatest
+// when present, else UserChoice (see decideDefault). This both rejects a stale
+// UserChoiceLatest that dead-ends clicks beside a healthy UserChoice (#9) and
+// accepts a valid UserChoiceLatest=guise beside a stale legacy UserChoice that
+// Windows ignores (#29). readUCProgID reads each key's ProgID across the two
+// layouts Windows uses (direct value vs. nested subkey, #29). We only ever read
+// these values to detect state; the tamper-protected Hash means the default can
+// never be forced here. A missing key simply means it does not constrain the verdict.
 func IsDefault(exe string) (bool, error) {
-	uc, err := readString(userChoiceKey, "ProgId")
+	uc, err := readUCProgID(userChoiceKey)
 	if err != nil {
 		return false, fmt.Errorf("reading UserChoice ProgId: %w", err)
 	}
-	latest, err := readString(userChoiceLatestKey, "ProgId")
+	latest, err := readUCProgID(userChoiceLatestKey)
 	if err != nil {
 		return false, fmt.Errorf("reading UserChoiceLatest ProgId: %w", err)
 	}
 	return decideDefault(exe, uc, latest, handlerExe), nil
 }
 
+// authoritativeProgID returns the ProgID Windows actually resolves https clicks
+// through (§3.3, §3.4): UserChoiceLatest when present, since Windows 11 24H2+
+// prefers it, otherwise the legacy UserChoice. This is the key the verdict must
+// judge — a stale UserChoice sitting beside a valid UserChoiceLatest (a common
+// 24H2 state, #29) does not change what Windows launches, so it must not change
+// the verdict either.
+func authoritativeProgID(ucProgID, latestProgID string) string {
+	if latestProgID != "" {
+		return latestProgID
+	}
+	return ucProgID
+}
+
 // decideDefault is the pure verdict behind IsDefault, split out from registry
 // I/O so it is testable without HKCU (like repairProgIDs). resolve maps a ProgID
 // to the exe its HKCU class command would launch (""=unresolvable). guise is
-// default iff UserChoice resolves to exe and UserChoiceLatest, when present,
-// also resolves to exe — so a stale ProgID in either slot fails the check.
+// default iff the authoritative ProgID — UserChoiceLatest, else UserChoice —
+// resolves to exe. Judging the authoritative key alone fixes both failure modes:
+// a stale UserChoiceLatest beside a healthy UserChoice still reads as not-default
+// (#9, clicks dead-end through Latest), and a stale UserChoice beside a valid
+// UserChoiceLatest now reads as default (#29, Windows launches guise via Latest).
 func decideDefault(exe, ucProgID, latestProgID string, resolve func(string) string) bool {
-	is := func(pid string) bool { return pid != "" && samePath(resolve(pid), exe) }
-	if !is(ucProgID) {
-		return false
-	}
-	return latestProgID == "" || is(latestProgID)
+	pid := authoritativeProgID(ucProgID, latestProgID)
+	return pid != "" && samePath(resolve(pid), exe)
 }
 
 // Health classifies the default-browser state for the TRAY watchdog (§3.5).
@@ -162,11 +182,11 @@ const (
 // not an error, just as in IsDefault — so the caller can treat an error as an
 // unreadable state rather than a reversion.
 func HealthCheck(exe string) (Health, error) {
-	uc, err := readString(userChoiceKey, "ProgId")
+	uc, err := readUCProgID(userChoiceKey)
 	if err != nil {
 		return HealthNotDefault, fmt.Errorf("reading UserChoice ProgId: %w", err)
 	}
-	latest, err := readString(userChoiceLatestKey, "ProgId")
+	latest, err := readUCProgID(userChoiceLatestKey)
 	if err != nil {
 		return HealthNotDefault, fmt.Errorf("reading UserChoiceLatest ProgId: %w", err)
 	}
@@ -174,36 +194,31 @@ func HealthCheck(exe string) (Health, error) {
 }
 
 // decideHealth is the pure verdict behind HealthCheck, split from registry I/O
-// to stay testable without HKCU (like decideDefault, which it builds on).
-// resolve maps a ProgID to the exe its HKCU class command would launch (""=none,
-// i.e. a system ProgID with no HKCU class). guise is repairable only when every
-// populated key it does not already satisfy names a guise-owned ProgID (one with
-// an HKCU class command we can rewrite); a single foreign handler makes the whole
-// state HealthNotDefault, since repointing a class clicks never reach won't help.
+// to stay testable without HKCU (like decideDefault, which it builds on). It
+// judges the authoritative ProgID — UserChoiceLatest, else UserChoice (§3.4) —
+// since that is the only handler Windows resolves clicks through: a stale legacy
+// UserChoice beside a valid UserChoiceLatest neither breaks routing nor blocks
+// repair (#29). resolve maps a ProgID to the exe its HKCU class command would
+// launch (""=none, i.e. a system ProgID with no HKCU class). The state is
+// repairable only when the authoritative ProgID is guise-owned (has an HKCU
+// class command we can rewrite); a foreign handler is HealthNotDefault, since
+// repointing a class clicks never reach won't help.
 func decideHealth(exe, ucProgID, latestProgID string, resolve func(string) string) Health {
-	if decideDefault(exe, ucProgID, latestProgID, resolve) {
-		return HealthDefault
+	pid := authoritativeProgID(ucProgID, latestProgID)
+	if pid == "" {
+		return HealthNotDefault // no handler recorded at all.
 	}
-	repairable := false
-	for _, pid := range [2]string{ucProgID, latestProgID} {
-		if pid == "" {
-			continue // absent key: does not constrain the verdict.
-		}
-		handler := resolve(pid)
-		if samePath(handler, exe) {
-			continue // this key already routes to the current exe.
-		}
-		if handler == "" {
-			// No HKCU class command — a system-managed handler (ChromeHTML,
-			// MSEdgeHTM in HKLM) or an unknown ProgID. Cannot be repointed.
-			return HealthNotDefault
-		}
-		repairable = true // a guise-owned class pointing somewhere stale.
+	handler := resolve(pid)
+	if samePath(handler, exe) {
+		return HealthDefault // the active handler already launches this exe.
 	}
-	if repairable {
-		return HealthRepairable
+	if handler == "" {
+		// No HKCU class command — a system-managed handler (ChromeHTML,
+		// MSEdgeHTM in HKLM) or an unknown ProgID. Cannot be repointed.
+		return HealthNotDefault
 	}
-	return HealthNotDefault
+	// A guise-owned class pointing somewhere stale — repointing it restores clicks.
+	return HealthRepairable
 }
 
 // handlerExe returns the exe that progID's HKCU class shell\open\command would
@@ -345,16 +360,39 @@ func repointProgIDs(exe string, candidates []string) []string {
 	return repaired
 }
 
-// readProgID returns the ProgId value at a UserChoice/UserChoiceLatest key, or
+// readProgID returns the ProgId chosen at a UserChoice/UserChoiceLatest key, or
 // "" if the key or value is missing. A real read error is logged (and yields
 // "") so callers treat it the same as "nothing to repair" without losing the
-// diagnostic.
+// diagnostic. It goes through readUCProgID so it sees the nested layout newer
+// Windows 11 builds use for UserChoiceLatest (#29).
 func readProgID(path string) string {
-	pid, err := readString(path, "ProgId")
+	pid, err := readUCProgID(path)
 	if err != nil {
 		log.Printf("reading ProgId at %s: %v", path, err)
 	}
 	return pid
+}
+
+// readUCProgID reads the ProgID chosen at a UserChoice / UserChoiceLatest key.
+// Historically the ProgID was a plain "ProgId" value directly on that key, but
+// current Windows 11 builds (observed on 24H2) nest UserChoiceLatest's ProgID
+// one level deeper — as a "ProgId" value inside a "ProgId" *subkey* — leaving no
+// "ProgId" value on UserChoiceLatest itself (#29). Reading only the direct value
+// then yields "" for the very key Windows resolves clicks through, so guise sees
+// the stale legacy UserChoice and reports "not default" while Windows launches
+// guise. We read the direct value first (the legacy layout, still used by
+// UserChoice) and fall back to the nested subkey, so detection matches whichever
+// layout this build uses. A missing key or value is absence, not an error
+// (readString already maps ErrNotExist to "", nil), exactly as before.
+func readUCProgID(key string) (string, error) {
+	pid, err := readString(key, progIDValue)
+	if err != nil {
+		return "", err
+	}
+	if pid != "" {
+		return pid, nil
+	}
+	return readString(key+`\`+progIDValue, progIDValue)
 }
 
 // readString reads a string value (name "" = the (Default) value). A missing
