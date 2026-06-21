@@ -19,7 +19,15 @@ type Rule struct {
 	Pattern          string `json:"pattern"`             // Go RE2 pattern, matched unanchored.
 	ProfileDirectory string `json:"profile_directory"`   // On-disk dir name, e.g. "Profile 3".
 	Incognito        bool   `json:"incognito,omitempty"` // Open the matched URL in an incognito window. Omitempty + default-false keeps existing configs byte-identical.
-	Comment          string `json:"comment"`
+	// Source optionally constrains the rule to clicks that originated from a
+	// particular application (§5.4, #16): a case-insensitive substring matched
+	// against the originating process's image name (e.g. "slack" matches
+	// Slack.exe). Empty = match any source, so existing configs are unaffected.
+	// A rule with both Pattern and Source requires BOTH to match (AND); a rule
+	// with only Source matches any URL from that app. Omitempty keeps configs
+	// without a source predicate byte-identical.
+	Source  string `json:"source,omitempty"`
+	Comment string `json:"comment"`
 }
 
 // Rewrite is a literal find-and-replace transform applied to the URL before it

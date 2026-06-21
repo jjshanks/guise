@@ -187,6 +187,13 @@ Rules live in `%APPDATA%\Guise\config.json` and are edited from the tray
 - Matching is **case-sensitive**; prefix `(?i)` for case-insensitive.
 - `profile_directory` is the on-disk folder name (`Default`, `Profile 1`, …),
   not the friendly Chrome name. The editor's dropdown bridges the two.
+- `source` (optional) matches the **app that produced the click** — a
+  case-insensitive substring of the process image name, e.g. `slack` matches
+  `Slack.exe`. A rule with both `pattern` and `source` needs **both** to match;
+  a `source`-only rule matches any URL from that app. The lookup walks the
+  process tree (skipping OS brokers like `explorer.exe`) and is best-effort: if
+  the source can't be determined the rule is simply skipped and the click still
+  routes. The editor's "from app" field next to "Test URL" previews it.
 - `chrome_path` empty = auto-detect.
 
 ## Diagnostics
@@ -202,6 +209,7 @@ main_windows.go            mode dispatch (ROUTE / TRAY / SETUP)
 internal/config            config schema, load, atomic save (§5)
 internal/router            ordered RE2 matching + ROUTE-mode launch (§5.3, §12)
 internal/chrome            profile discovery + chrome.exe resolution (§4)
+internal/source            originating-app lookup: process-tree walk (§5.4)
 internal/winreg            HKCU registration, default detection, autostart (§3, §7)
 internal/tray              systray menu + GUI thread dispatch (§6.1) + update check (§14)
 internal/editor            walk rule editor + test dialog (§6.2)

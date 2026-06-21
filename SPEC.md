@@ -303,6 +303,7 @@ Field notes:
 - `pattern` is a Go `regexp` (RE2) pattern, matched **unanchored** against the full URL string (§5.3). RE2 has no backreferences — document this so users don't paste PCRE.
 - `profile_directory` stores the *directory* name (e.g. `Profile 3`); the editor shows the friendly name.
 - `incognito` opens the matched URL in a private window (`--incognito`). Combined with `profile_directory` it opens an incognito window for that profile; with no profile it is just `--incognito <url>`. It is independent of the profile fallback (a vanished profile still launches incognito). Omitted from the file when false, so existing configs are untouched.
+- `source` optionally constrains the rule to clicks that originated from a particular application — a case-insensitive substring matched against the originating process's image name, e.g. `"slack"` matches `Slack.exe` (§5.4). Absent/empty = match any source. A rule with both `pattern` and `source` requires **both** to match (AND); a rule with only `source` matches any URL from that app. Omitted from the file when empty, so existing configs are untouched.
 - `chrome_path` empty = auto-detect (§4.3).
 - There is no default-profile field. When no rule matches, Chrome launches with no profile flag (§5.3).
 - `rewrites` are literal find/replace URL transforms applied in list order; `delayed` controls whether a rewrite runs before (default) or after profile matching (§15).
@@ -319,6 +320,23 @@ Field notes:
 Locked-in decisions:
 - **Matching is unanchored** (`regexp.MatchString` semantics): the pattern matches if it occurs *anywhere* in the URL. `github\.com/foo` therefore also matches `github.com/foobar`, `github.com/foo-archive`, etc. To pin a boundary, the user anchors explicitly — e.g. `github\.com/foo(/|$)` or `^https://github\.com/foo$`. This is the documented foot-gun; the editor's test panel (§6) exists to make it visible before it surprises you.
 - Matching is **case-sensitive** by default; users prefix `(?i)` for case-insensitive patterns.
+
+### 5.4 Source-app matching (#16)
+
+A rule may additionally match on the **source application** that produced the click — e.g. "every link from Slack → Work profile" regardless of the URL. The optional `source` field is a **case-insensitive substring** matched against the originating process's image name (`"slack"` matches `Slack.exe`).
+
+Semantics (extends §5.3):
+- A rule with both `pattern` and `source` requires **both** to match (logical AND).
+- A rule with only `source` (blank `pattern`) matches **any URL** from that app. This is the one case where a blank pattern is *not* inert — the source predicate makes the rule meaningful. A rule with neither `pattern` nor `source` stays inert (an empty regex must never hijack all routing).
+- A sourceless rule (the common case) is unaffected by the source, so existing configs behave identically.
+
+**Resolving the source — keep ROUTE stateless (§2).** ROUTE is a fresh, short-lived process per click, so source identity is derived from the live process tree at launch, not from any resident state. When Windows runs `guise.exe <url>`, the parent process is the app that opened the link (or an OS shell broker). The lookup (`internal/source`) snapshots the process table (`CreateToolhelp32Snapshot`) and walks up from this PID toward the root, returning the first ancestor whose image name is *not* a known broker.
+
+**Known-broker caveat.** The *immediate* parent is often not the originating app: clicks frequently arrive via `explorer.exe`, `ApplicationFrameHost.exe`, `RuntimeBroker.exe`, `svchost.exe`, `dllhost.exe`, `sihost.exe`, or `openwith.exe`. These are skipped while walking up (along with `guise.exe` itself), so the reported source is the real app above the broker chain. The walk is depth-bounded (and stops at a self-referential root PID) so PID reuse can never loop it.
+
+**Best-effort and fail-open.** If the source cannot be determined (parent already exited, only brokers up to the root, snapshot failed, or non-Windows), the lookup returns `""`. An empty source can never satisfy a `source` predicate, so such a rule is simply skipped and matching continues to the next rule — **a click is never blocked** because the source was unknown.
+
+The Win32 snapshot lives in `internal/source/source_windows.go` with a matching `_other.go` stub (platform-split convention); the tree-walk and broker-skipping logic is pure and cross-platform tested. The resolved source is computed **once** per ROUTE invocation and injected into `Match` as an argument (same seam pattern as `startProcess`), so matching stays pure and the editor's "Test URL" preview can simulate a source.
 
 ---
 
@@ -353,7 +371,8 @@ A simple table-driven editor. Columns: `↑↓ (reorder) | Enabled | Pattern | P
 - Chrome path field (with auto-detect + browse).
 - Live regex validation: invalid patterns flagged inline (compile with `regexp.Compile`).
 - An "Open in incognito" checkbox in the selected-rule detail pane: when set, a matched URL launches with `--incognito` (combined with the profile flag when a profile is chosen).
-- A "Test URL" field at the top: type a URL and the matching row highlights (or it reports "no match → Chrome default"). The preview shows `[incognito]` when the matched rule opts in, so it's visible before a real click. Because matching is unanchored, this is the primary way to catch a pattern that's broader than intended.
+- A "Source app (optional)" field in the selected-rule detail pane: a case-insensitive substring of the originating process image name (§5.4), e.g. `slack`. Blank = match any source.
+- A "Test URL" field at the top, with an adjacent "from app" field that simulates the originating app so a source-matching rule previews meaningfully (blank = source undeterminable): type a URL and the matching row highlights (or it reports "no match → Chrome default"). The preview shows `[incognito]` when the matched rule opts in, so it's visible before a real click. Because matching is unanchored, this is the primary way to catch a pattern that's broader than intended.
 - Save writes config.json atomically (write temp file in same dir, `os.Rename`).
 
 No default-profile control — the no-match case is fixed behavior (launch Chrome with no profile flag) and needs no configuration.
@@ -397,7 +416,7 @@ HKCU = no elevation. Only the **tray** autostarts; routing needs nothing residen
 ## 9. Logging & diagnostics
 
 - Log file: `%APPDATA%\Guise\guise.log` (rotated, small).
-- ROUTE mode logs: timestamp, input URL, matched rule id (or "default"), resolved profile, chrome path, launch result. One line per click.
+- ROUTE mode logs: timestamp, input URL, matched rule id (or "default"), resolved profile, the resolved source app (`source=`, empty when undeterminable, §5.4), chrome path, launch result. One line per click.
 - This log is the primary debugging surface — when a link opens in the "wrong" profile, the log shows exactly which rule won.
 
 ---
@@ -412,6 +431,7 @@ HKCU = no elevation. Only the **tray** autostarts; routing needs nothing residen
 | Malformed config.json | Load last-good in-memory copy if available; otherwise route everything with no profile flag (Chrome default) and surface an error in the tray. Never block routing on bad config. |
 | Two Chrome windows race | Fine — Chrome dedupes by profile; passing a URL to an already-running profile opens a tab. |
 | Non-http(s) scheme handed to us | Pass through to Chrome unchanged. |
+| Source app undeterminable (broker chain, parent exited) | A `source` rule's predicate is left unsatisfied; the rule is skipped and matching continues. Never block the click (§5.4). |
 | Very long / weird URLs | Always pass via argv (`"%1"`), never via a shell string, to avoid quoting injection. |
 | Multiple monitors / DPI | Editor window must be per-monitor-DPI-aware (manifest setting, §8). |
 

@@ -23,6 +23,7 @@ type routeHarness struct {
 	gotArgs    []string
 	launchErr  error // returned by the stubbed launcher when set.
 	notified   bool
+	source     string // injected originating app (§5.4); "" = undeterminable.
 }
 
 func newRouteHarness(t *testing.T) *routeHarness {
@@ -36,7 +37,7 @@ func newRouteHarness(t *testing.T) *routeHarness {
 	}
 	h := &routeHarness{chromePath: chromePath}
 
-	origStart, origNotify := startProcess, notifyError
+	origStart, origNotify, origSource := startProcess, notifyError, resolveSource
 	startProcess = func(path string, args ...string) error {
 		h.launched = true
 		h.gotPath = path
@@ -44,7 +45,10 @@ func newRouteHarness(t *testing.T) *routeHarness {
 		return h.launchErr
 	}
 	notifyError = func(string, string) { h.notified = true }
-	t.Cleanup(func() { startProcess, notifyError = origStart, origNotify })
+	// Stub the source lookup so Route is hermetic and never depends on the real
+	// process tree; tests that exercise source matching set h.source.
+	resolveSource = func() string { return h.source }
+	t.Cleanup(func() { startProcess, notifyError, resolveSource = origStart, origNotify, origSource })
 	return h
 }
 
@@ -123,6 +127,39 @@ func TestRouteIncognitoNoProfile(t *testing.T) {
 	}
 }
 
+func TestRouteSourceRuleMatchesWhenAppMatches(t *testing.T) {
+	// End-to-end: the injected source (§5.4) satisfies a source-only rule, so the
+	// click routes to that profile regardless of the URL.
+	h := newRouteHarness(t)
+	h.source = "Slack.exe"
+	h.writeConfig(t, `[{"id":"1","enabled":true,"source":"slack","profile_directory":"Profile 1"}]`)
+	h.writeLocalState(t, `{"profile":{"info_cache":{"Profile 1":{"name":"Work"}}}}`)
+
+	if err := Route("https://anything.example/x"); err != nil {
+		t.Fatalf("Route: %v", err)
+	}
+	want := []string{"--profile-directory=Profile 1", "https://anything.example/x"}
+	if !reflect.DeepEqual(h.gotArgs, want) {
+		t.Errorf("args = %v, want %v", h.gotArgs, want)
+	}
+}
+
+func TestRouteSourceRuleFailsOpenWhenUndeterminable(t *testing.T) {
+	// When the source can't be resolved (""), the source rule's predicate is
+	// unsatisfied and the click still routes — to Chrome default here (§5.4).
+	h := newRouteHarness(t)
+	h.source = "" // undeterminable
+	h.writeConfig(t, `[{"id":"1","enabled":true,"source":"slack","profile_directory":"Profile 1"}]`)
+	h.writeLocalState(t, `{"profile":{"info_cache":{"Profile 1":{"name":"Work"}}}}`)
+
+	if err := Route("https://example.com/x"); err != nil {
+		t.Fatalf("Route: %v", err)
+	}
+	if want := []string{"https://example.com/x"}; !reflect.DeepEqual(h.gotArgs, want) {
+		t.Errorf("args = %v, want %v (undeterminable source must fail open to Chrome default)", h.gotArgs, want)
+	}
+}
+
 func TestResolveIncognitoSurvivesDroppedProfile(t *testing.T) {
 	// Incognito is independent of the profile fallback: a vanished profile drops to
 	// Chrome default but the rule still requests a private window.
@@ -132,7 +169,7 @@ func TestResolveIncognitoSurvivesDroppedProfile(t *testing.T) {
 	cfg := &config.Config{Version: 1, Rules: []config.Rule{
 		{ID: "r", Enabled: true, Pattern: `x\.com`, ProfileDirectory: "Profile 7", Incognito: true}, // profile not in Local State
 	}}
-	got := Resolve(cfg, "https://x.com/foo")
+	got := Resolve(cfg, "https://x.com/foo", "")
 	if !got.ProfileDropped || got.ProfileDirectory != "" {
 		t.Errorf("missing profile should drop: dropped=%v dir=%q", got.ProfileDropped, got.ProfileDirectory)
 	}
@@ -274,7 +311,7 @@ func TestResolveDropsMissingProfileSoPreviewMatchesRoute(t *testing.T) {
 	cfg := &config.Config{Version: 1, Rules: []config.Rule{
 		{ID: "r", Enabled: true, Pattern: `x\.com`, ProfileDirectory: "Profile 7"}, // not in Local State
 	}}
-	got := Resolve(cfg, "https://x.com/foo")
+	got := Resolve(cfg, "https://x.com/foo", "")
 	if got.Rule == nil || got.Rule.ID != "r" {
 		t.Fatalf("expected rule r to match, got %+v", got.Rule)
 	}
@@ -290,7 +327,7 @@ func TestResolveKeepsExistingProfile(t *testing.T) {
 	cfg := &config.Config{Version: 1, Rules: []config.Rule{
 		{ID: "r", Enabled: true, Pattern: `x\.com`, ProfileDirectory: "Profile 1"},
 	}}
-	got := Resolve(cfg, "https://x.com/foo")
+	got := Resolve(cfg, "https://x.com/foo", "")
 	if got.ProfileDropped || got.ProfileDirectory != "Profile 1" {
 		t.Errorf("existing profile should be kept: dropped=%v dir=%q", got.ProfileDropped, got.ProfileDirectory)
 	}
@@ -307,7 +344,7 @@ func TestResolveAppliesRewritesAroundMatch(t *testing.T) {
 			{ID: "late", Enabled: true, Find: "x.com", Replace: "xcancel.com", Delayed: true},
 		},
 	}
-	got := Resolve(cfg, "https://x.com/foo")
+	got := Resolve(cfg, "https://x.com/foo", "")
 	// Matched on the original host (delayed rewrite runs after the match)...
 	if got.Rule == nil || got.ProfileDirectory != "Profile 1" {
 		t.Fatalf("delayed rewrite should not affect the match: %+v", got)
