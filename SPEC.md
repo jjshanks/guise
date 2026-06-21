@@ -158,6 +158,51 @@ into a working alias. It is scoped to ProgIDs that already have an HKCU class co
 system-managed ProgIDs in HKLM (`ChromeHTML`, `MSEdgeHTM`) are never hijacked, and it fails soft
 (per-ProgID errors are logged and skipped — never block registration or routing).
 
+### 3.5 Default-browser watchdog (TRAY)
+
+The repair pass in 3.4 runs once, at `--register` and at tray startup. But Windows 11 reverts the
+default browser *at runtime too*: `UserChoice`/`UserChoiceLatest` hash protection, the UCPD driver,
+and Patch-Tuesday scheduled tasks silently repoint the default back to Edge after a reboot, and link
+clicks then start failing with no signal. So the tray also runs a **proactive, recurring watchdog**
+that catches the reversion after it happens and surfaces it, instead of the user discovering it only
+when links stop working (#14).
+
+**Where it runs — TRAY only.** Like the update check (§14.1) and the §6.1 status poll, the watchdog
+lives exclusively in the long-lived tray; ROUTE (§2) stays the stateless, IO-free hot path. In fact
+the watchdog *is* the §6.1 status poll: the same periodic `winreg.HealthCheck` read drives both the
+menu indicator and the reversion detection, so there is one registry read, not two.
+
+**Health verdict.** `winreg.HealthCheck(exe)` reads the same two https keys as `IsDefault` (3.3) and
+returns one of three states:
+
+- **`HealthDefault`** — guise is the working https handler (identical to `IsDefault` true).
+- **`HealthRepairable`** — not default, but the active handler still names a **guise-owned** ProgID
+  (one with an `HKCU\SOFTWARE\Classes\<ProgID>\shell\open\command`) left pointing at a stale/missing
+  exe. Repointing that class at the current `guise.exe` — all HKCU, no elevation — restores clicks.
+- **`HealthNotDefault`** — the chosen handler is **foreign** (a system ProgID like `MSEdgeHTM`,
+  defined in HKLM, that apps cannot repoint). Class repair can't help; the user must re-choose guise.
+
+A foreign ProgID in **either** populated key forces `HealthNotDefault`, since clicks resolved through
+it never reach guise no matter what class we rewrite.
+
+**Spec requirement.** On a runtime **healthy → broken** transition (and only that edge, so a
+persistently-broken state never re-nags), the tray raises an **actionable notification** (§10). The
+recovery lever is `recoverDefault`, shared with a click on the "Default browser: No — click to fix"
+menu item:
+
+- On `HealthRepairable`, `winreg.Repair(exe)` repoints every guise-owned ProgID named by the https
+  `UserChoice`/`UserChoiceLatest` keys at the current exe (HKCU only), then re-verifies. Unlike 3.4's
+  `RepairStaleDefaults`, `Repair` also corrects `GuiseHTML` itself when its class points at an old
+  path — the goal is to make the *active* handler launch this exe — and corrects an existing-but-wrong
+  target, not only a vanished one. It still skips ProgIDs with no HKCU class (system handlers), so it
+  can never hijack another browser.
+- On `HealthNotDefault`, or when a repair doesn't stick, the action deep-links to
+  `ms-settings:defaultapps` (3.3) — the only non-elevated recourse for a foreign handler.
+
+Like routing (§2) and the updater (§14.4), the watchdog **fails soft**: a `HealthCheck`/`Repair`
+error is logged (§9) and never takes the tray down, and an unreadable state is treated as "no clean
+signal" (it neither flips the indicator's verdict nor counts as a reversion).
+
 ---
 
 ## 4. Chrome profile resolution
@@ -290,7 +335,7 @@ Start at login        [toggle]
 Quit
 ```
 
-- **Default browser status** — live indicator from §3.3 detection. If "No", clicking opens `ms-settings:defaultapps`.
+- **Default browser status** — live indicator from §3.3 detection, polled so it tracks changes made in Settings without a restart. The same poll is the §3.5 watchdog: a runtime healthy→broken transition raises an actionable notification. If "No", clicking the item runs `recoverDefault` (§3.5) — it repoints a stale guise-owned ProgID class (HKCU) when it can, otherwise opens `ms-settings:defaultapps`.
 - **Edit rules…** — opens the editor window (§6.2).
 - **Open config folder** — opens `%APPDATA%\Guise\` in Explorer for manual edits or log inspection.
 - **Start at login** — toggles the autostart registry value (§7).

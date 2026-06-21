@@ -107,6 +107,60 @@ func TestRepairProgIDsRoundTrip(t *testing.T) {
 	}
 }
 
+// TestRepointProgIDsRoundTrip verifies the watchdog's recovery rewrite (§3.5,
+// #14) against real HKCU classes: unlike repairProgIDs, repointProgIDs repoints a
+// guise-owned ProgID whose class command points anywhere other than the current
+// exe — even at a still-existing wrong binary — while leaving a class already
+// launching the current exe and a system-managed ProgID (no HKCU class) untouched.
+// It drives repointProgIDs directly so it never writes the real UserChoice keys.
+// Gated behind GUISE_REGISTRY_IT=1 like the other round-trips.
+func TestRepointProgIDsRoundTrip(t *testing.T) {
+	if os.Getenv("GUISE_REGISTRY_IT") != "1" {
+		t.Skip("set GUISE_REGISTRY_IT=1 to run the registry integration test")
+	}
+	const (
+		newExe   = `C:\Test\guise.exe`
+		wrongPID = "GuiseITWrongHTML" // class points at an existing-but-wrong exe
+		curPID   = "GuiseITCurrentHTML"
+	)
+	wrongCmdKey := classesKey + `\` + wrongPID + `\shell\open\command`
+	curCmdKey := classesKey + `\` + curPID + `\shell\open\command`
+	t.Cleanup(func() {
+		for _, p := range []string{
+			wrongCmdKey, classesKey + `\` + wrongPID + `\shell\open`, classesKey + `\` + wrongPID + `\shell`, classesKey + `\` + wrongPID,
+			curCmdKey, classesKey + `\` + curPID + `\shell\open`, classesKey + `\` + curPID + `\shell`, classesKey + `\` + curPID,
+		} {
+			registry.DeleteKey(registry.CURRENT_USER, p)
+		}
+	})
+
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	// Wrong: class points at this test binary (which exists), not newExe — so a
+	// fileExists check would skip it, but repointProgIDs must still correct it.
+	if err := setString(wrongCmdKey, "", command(self)); err != nil {
+		t.Fatalf("seed wrong: %v", err)
+	}
+	// Current: class already points at newExe — must be left untouched.
+	if err := setString(curCmdKey, "", command(newExe)); err != nil {
+		t.Fatalf("seed current: %v", err)
+	}
+
+	repaired := repointProgIDs(newExe, []string{wrongPID, curPID, "GuiseITMissingHTML"})
+
+	if len(repaired) != 1 || repaired[0] != wrongPID {
+		t.Fatalf("repaired = %v, want [%s]", repaired, wrongPID)
+	}
+	if got, _ := readString(wrongCmdKey, ""); got != command(newExe) {
+		t.Errorf("wrong command = %q, want %q", got, command(newExe))
+	}
+	if got, _ := readString(curCmdKey, ""); got != command(newExe) {
+		t.Errorf("current command = %q, want unchanged %q", got, command(newExe))
+	}
+}
+
 // TestHandlerExeRoundTrip verifies the resolver behind IsDefault (#9) against
 // real HKCU classes: a seeded ProgID's shell\open\command parses back to its
 // exe, and samePath then matches the current exe against it. An absent ProgID

@@ -136,6 +136,76 @@ func decideDefault(exe, ucProgID, latestProgID string, resolve func(string) stri
 	return latestProgID == "" || is(latestProgID)
 }
 
+// Health classifies the default-browser state for the TRAY watchdog (§3.5).
+// Windows 11 can silently revert the default browser (a Patch-Tuesday reboot
+// repointing UserChoiceLatest away from guise), so the tray re-checks health and
+// recovers. The verdict drives which recovery is possible without elevation.
+type Health int
+
+const (
+	// HealthDefault: guise is the working https handler — same condition as
+	// IsDefault returning true. Nothing to do.
+	HealthDefault Health = iota
+	// HealthRepairable: not default, but the active https handler still names a
+	// guise-owned ProgID (its HKCU class command points elsewhere/at a deleted
+	// exe). Repointing that class at the current exe — all HKCU — restores clicks.
+	HealthRepairable
+	// HealthNotDefault: not default, and the active handler is foreign (a system
+	// ProgID like MSEdgeHTM, defined in HKLM, that guise cannot repoint). The only
+	// recourse is to send the user to ms-settings:defaultapps.
+	HealthNotDefault
+)
+
+// HealthCheck reports the default-browser health for the watchdog (§3.5),
+// reading the same two https keys as IsDefault. It returns an error only on a
+// real registry read failure (e.g. a broken ACL) — a missing key is absence,
+// not an error, just as in IsDefault — so the caller can treat an error as an
+// unreadable state rather than a reversion.
+func HealthCheck(exe string) (Health, error) {
+	uc, err := readString(userChoiceKey, "ProgId")
+	if err != nil {
+		return HealthNotDefault, fmt.Errorf("reading UserChoice ProgId: %w", err)
+	}
+	latest, err := readString(userChoiceLatestKey, "ProgId")
+	if err != nil {
+		return HealthNotDefault, fmt.Errorf("reading UserChoiceLatest ProgId: %w", err)
+	}
+	return decideHealth(exe, uc, latest, handlerExe), nil
+}
+
+// decideHealth is the pure verdict behind HealthCheck, split from registry I/O
+// to stay testable without HKCU (like decideDefault, which it builds on).
+// resolve maps a ProgID to the exe its HKCU class command would launch (""=none,
+// i.e. a system ProgID with no HKCU class). guise is repairable only when every
+// populated key it does not already satisfy names a guise-owned ProgID (one with
+// an HKCU class command we can rewrite); a single foreign handler makes the whole
+// state HealthNotDefault, since repointing a class clicks never reach won't help.
+func decideHealth(exe, ucProgID, latestProgID string, resolve func(string) string) Health {
+	if decideDefault(exe, ucProgID, latestProgID, resolve) {
+		return HealthDefault
+	}
+	repairable := false
+	for _, pid := range [2]string{ucProgID, latestProgID} {
+		if pid == "" {
+			continue // absent key: does not constrain the verdict.
+		}
+		handler := resolve(pid)
+		if samePath(handler, exe) {
+			continue // this key already routes to the current exe.
+		}
+		if handler == "" {
+			// No HKCU class command — a system-managed handler (ChromeHTML,
+			// MSEdgeHTM in HKLM) or an unknown ProgID. Cannot be repointed.
+			return HealthNotDefault
+		}
+		repairable = true // a guise-owned class pointing somewhere stale.
+	}
+	if repairable {
+		return HealthRepairable
+	}
+	return HealthNotDefault
+}
+
 // handlerExe returns the exe that progID's HKCU class shell\open\command would
 // launch, or "" if no such command exists or it cannot be parsed. It is the
 // real resolver passed to decideDefault, and mirrors how repairProgIDs reads a
@@ -215,6 +285,59 @@ func repairProgIDs(exe string, candidates []string) []string {
 		}
 		if err := setString(cmdKey, "", command(exe)); err != nil {
 			log.Printf("repair stale ProgID %q: %v", pid, err)
+			continue
+		}
+		repaired = append(repaired, pid)
+	}
+	return repaired
+}
+
+// Repair is the TRAY watchdog's recovery lever for a HealthRepairable verdict
+// (§3.5). It repoints every guise-owned ProgID named by the https UserChoice and
+// UserChoiceLatest keys at exe, so clicks resolved through them reach the current
+// binary. "Guise-owned" means the ProgID has an HKCU class command — system
+// handlers (ChromeHTML, MSEdgeHTM) live in HKLM and are left untouched — so this
+// can never hijack another browser. Unlike RepairStaleDefaults (which only heals
+// ProgIDs whose exe has vanished), Repair also corrects GuiseHTML itself when its
+// class was left pointing at an old path, since the watchdog's goal is to make
+// the active handler launch *this* exe. It is HKCU-only and fails soft: per-ProgID
+// errors are logged and skipped, and the repaired ProgIDs are returned for logging.
+func Repair(exe string) []string {
+	seen := map[string]bool{}
+	var candidates []string
+	for _, choice := range []string{"UserChoice", "UserChoiceLatest"} {
+		pid := readProgID(assocBase + `https\` + choice)
+		if pid == "" || seen[pid] {
+			continue
+		}
+		seen[pid] = true
+		candidates = append(candidates, pid)
+	}
+	return repointProgIDs(exe, candidates)
+}
+
+// repointProgIDs rewrites the shell\open\command of each candidate ProgID that
+// has an HKCU class command not already launching exe, pointing it at exe.
+// ProgIDs without an HKCU class command (system-managed) or already launching
+// exe are left untouched. Split out from Repair so tests can drive it with
+// throwaway ProgIDs without writing the real UserChoice keys.
+func repointProgIDs(exe string, candidates []string) []string {
+	var repaired []string
+	for _, pid := range candidates {
+		cmdKey := classesKey + `\` + pid + `\shell\open\command`
+		cmd, err := readString(cmdKey, "")
+		if err != nil {
+			log.Printf("reading command for ProgID %q: %v", pid, err)
+			continue
+		}
+		if cmd == "" {
+			continue // No HKCU class command: system-managed. Leave it.
+		}
+		if samePath(exeFromCommand(cmd), exe) {
+			continue // Already launches the current exe — nothing to repoint.
+		}
+		if err := setString(cmdKey, "", command(exe)); err != nil {
+			log.Printf("repoint ProgID %q: %v", pid, err)
 			continue
 		}
 		repaired = append(repaired, pid)
