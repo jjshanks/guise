@@ -71,6 +71,11 @@ pre-rewrites → rule match → profile validate/fallback → delayed rewrites, 
 profile flag and (if the matched rule opts in) `--incognito`.
 - **Matching:** Go RE2 regex (`regexp` package — no backreferences), **unanchored** against the
   full URL, **case-sensitive** by default. `Start()` not `Run()` so ROUTE exits without waiting.
+- **Source app (§5.4):** a rule may also match the originating app (`source`, a case-insensitive
+  substring of the process image name). `Route` resolves it once via `internal/source` (process-tree
+  walk, skipping brokers) and injects it into `Match` — best-effort, **fail-open**: an
+  undeterminable source leaves the predicate unsatisfied and routing continues. `pattern` + `source`
+  is an AND; `source`-only matches any URL from that app.
 - **Rewrites (§15):** literal find/replace, all enabled ones applied in order (not first-match).
   Non-delayed rewrites run *before* matching (profile + launched URL both see the result); delayed
   ones run *after*, changing the launched URL without affecting which profile is chosen.
@@ -99,6 +104,7 @@ console_windows.go   AttachConsole helper so --version can print to the launchin
 internal/config      config schema, load, atomic save (write temp + os.Rename)
 internal/router      ordered RE2 matching + ROUTE-mode Chrome launch  ← the heart (SPEC §12)
 internal/chrome      Chrome profile discovery (Local State JSON) + chrome.exe resolution (SPEC §4)
+internal/source      originating-app lookup: process-tree walk + broker skipping (SPEC §5.4)
 internal/winreg      HKCU registration, default-browser detection + watchdog repair, autostart Run key (SPEC §3, §7)
 internal/tray        systray menu + GUI-thread dispatch (SPEC §6.1) + default-browser watchdog (SPEC §3.5) + background update check (SPEC §14)
 internal/editor      walk rule editor + test-URL dialog (SPEC §6.2)

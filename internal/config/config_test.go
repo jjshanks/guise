@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -128,5 +129,42 @@ func TestLoadNormalizesNilRewrites(t *testing.T) {
 	}
 	if cfg.Rewrites == nil {
 		t.Error("Rewrites should be normalized to an empty slice, got nil")
+	}
+}
+
+func TestSaveLoadRoundTripSource(t *testing.T) {
+	// The per-rule source matcher (§5.4, #16) round-trips, and a rule without one
+	// omits the key so existing configs stay byte-identical.
+	t.Setenv("APPDATA", t.TempDir())
+	want := &Config{
+		Version: SchemaVersion,
+		Rules: []Rule{
+			{ID: "a", Enabled: true, Source: "slack", ProfileDirectory: "Profile 1", Comment: "Slack → Work"},
+			{ID: "b", Enabled: true, Pattern: `github\.com`, ProfileDirectory: "Profile 2"},
+		},
+	}
+	if err := Save(want); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	data, err := os.ReadFile(Path())
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	// Exactly one "source" key on disk — the rule that set it; the omitempty rule
+	// must not write an empty "source".
+	if n := strings.Count(string(data), `"source"`); n != 1 {
+		t.Errorf("expected 1 source key on disk, got %d:\n%s", n, data)
+	}
+
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.Rules[0].Source != "slack" {
+		t.Errorf("source did not round-trip: got %q, want slack", got.Rules[0].Source)
+	}
+	if got.Rules[1].Source != "" {
+		t.Errorf("sourceless rule should load with empty source, got %q", got.Rules[1].Source)
 	}
 }

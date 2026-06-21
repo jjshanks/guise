@@ -93,17 +93,19 @@ type window struct {
 	model          *rulesModel
 	rwModel        *rewritesModel
 
-	tv          *walk.TableView
-	enabledCB   *walk.CheckBox
-	patternEd   *walk.LineEdit
-	patternErr  *walk.Label
-	profileCB   *walk.ComboBox
-	incognitoCB *walk.CheckBox
-	commentEd   *walk.LineEdit
-	chromePath  *walk.LineEdit
-	testEd      *walk.LineEdit
-	testResult  *walk.Label
-	status      *walk.Label
+	tv           *walk.TableView
+	enabledCB    *walk.CheckBox
+	patternEd    *walk.LineEdit
+	patternErr   *walk.Label
+	profileCB    *walk.ComboBox
+	incognitoCB  *walk.CheckBox
+	sourceEd     *walk.LineEdit
+	commentEd    *walk.LineEdit
+	chromePath   *walk.LineEdit
+	testEd       *walk.LineEdit
+	testSourceEd *walk.LineEdit
+	testResult   *walk.Label
+	status       *walk.Label
 
 	// Rewrite tab widgets (§15).
 	rwTV        *walk.TableView
@@ -179,6 +181,10 @@ func (w *window) build() error {
 				Children: []d.Widget{
 					d.Label{Text: "Test URL:"},
 					d.LineEdit{AssignTo: &w.testEd, OnTextChanged: w.onTest},
+					// Simulate the originating app (§5.4) so a source-matching rule
+					// previews meaningfully — blank means "source undeterminable".
+					d.Label{Text: "from app:"},
+					d.LineEdit{AssignTo: &w.testSourceEd, ToolTipText: "e.g. slack.exe — blank = source undeterminable", OnTextChanged: w.onTest},
 					d.Label{AssignTo: &w.testResult, Text: "type a URL to see how it routes"},
 				},
 			},
@@ -233,6 +239,8 @@ func (w *window) build() error {
 									d.Label{Text: "Profile:"},
 									d.ComboBox{AssignTo: &w.profileCB, OnCurrentIndexChanged: w.writeBack},
 									d.CheckBox{AssignTo: &w.incognitoCB, Text: "Open in incognito", OnCheckedChanged: w.writeBack, ColumnSpan: 2},
+									d.Label{Text: "Source app (optional):"},
+									d.LineEdit{AssignTo: &w.sourceEd, ToolTipText: "Match clicks from this app — case-insensitive substring of the process image name, e.g. slack matches Slack.exe. Blank = any source.", OnTextChanged: w.writeBack},
 									d.Label{Text: "Comment:"},
 									d.LineEdit{AssignTo: &w.commentEd, OnTextChanged: w.writeBack},
 								},
@@ -422,6 +430,7 @@ func (w *window) populate() {
 		w.commentEd.SetText("")
 		w.profileCB.SetCurrentIndex(0)
 		w.incognitoCB.SetChecked(false)
+		w.sourceEd.SetText("")
 		w.patternErr.SetText("")
 		return
 	}
@@ -431,6 +440,7 @@ func (w *window) populate() {
 	w.commentEd.SetText(r.Comment)
 	w.profileCB.SetCurrentIndex(w.comboIndexForProfile(r.ProfileDirectory))
 	w.incognitoCB.SetChecked(r.Incognito)
+	w.sourceEd.SetText(r.Source)
 	w.validatePattern(r.Pattern)
 }
 
@@ -446,6 +456,7 @@ func (w *window) writeBack() {
 	r.Comment = w.commentEd.Text()
 	r.ProfileDirectory = w.profileForComboIndex(w.profileCB.CurrentIndex())
 	r.Incognito = w.incognitoCB.Checked()
+	r.Source = w.sourceEd.Text()
 	w.model.PublishRowChanged(w.current)
 }
 
@@ -520,7 +531,10 @@ func (w *window) onTest() {
 		w.testResult.SetText("type a URL to see how it routes")
 		return
 	}
-	r := router.Resolve(w.cfg, url)
+	// The "from app" field simulates the originating app (§5.4) so a
+	// source-matching rule previews exactly as a real click from that app would;
+	// blank means the source is undeterminable.
+	r := router.Resolve(w.cfg, url, w.testSourceEd.Text())
 
 	// Clear any stale highlight first; only a real match re-selects a row below.
 	w.tv.SetCurrentIndex(-1)

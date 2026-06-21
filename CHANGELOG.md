@@ -10,6 +10,17 @@ below.
 
 ## [Unreleased]
 
+### Added
+- Source-app matching: a rule can now match on the **application that produced
+  the click** via an optional `source` field — a case-insensitive substring of
+  the originating process's image name (e.g. `slack` matches `Slack.exe`). A rule
+  with both `pattern` and `source` requires both to match; a `source`-only rule
+  matches any URL from that app. The source is resolved per click by walking the
+  process tree and skipping OS brokers (`explorer.exe`, `RuntimeBroker.exe`, …);
+  it is best-effort and fails open, so a click is never blocked when the source
+  can't be determined. Exposed in the rule editor as a "Source app" field, with a
+  "from app" simulator next to Test URL. Documented as SPEC §5.4 (#16).
+
 ## [0.4.0] - 2026-06-12
 
 ### Added

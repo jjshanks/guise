@@ -8,18 +8,23 @@ import (
 	"guise/internal/chrome"
 	"guise/internal/config"
 	"guise/internal/notify"
+	"guise/internal/source"
 )
 
 // Seams for testing. startProcess launches Chrome detached (Start, not Run, so
 // ROUTE mode exits immediately rather than lingering as Chrome's parent);
-// notifyError pops a Windows message box, which blocks until dismissed. Tests
-// override both so the launch decision can be asserted without spawning Chrome
-// or popping a modal dialog.
+// notifyError pops a Windows message box, which blocks until dismissed;
+// resolveSource walks the process tree to identify the app that produced the
+// click (§5.4) and is the Win32 lookup the issue calls out — injected here so
+// Match/Resolve stay pure. Tests override all three so the launch decision can
+// be asserted without spawning Chrome, popping a modal dialog, or depending on
+// the real process tree.
 var (
 	startProcess = func(path string, args ...string) error {
 		return exec.Command(path, args...).Start()
 	}
-	notifyError = notify.Error
+	notifyError   = notify.Error
+	resolveSource = source.Current
 )
 
 // Resolution is the outcome of running a URL through the full ROUTE pipeline
@@ -35,21 +40,25 @@ type Resolution struct {
 	ProfileDropped   bool         // True when a matched profile was invalid/missing and fell back.
 	Incognito        bool         // True when the matched rule opts into an incognito window.
 	Applied          []string     // IDs of the rewrites that changed the URL, in order.
+	Source           string       // The resolved originating app image name ("" = undeterminable), as matched against.
 }
 
 // Resolve runs the ROUTE pipeline against url without launching Chrome: apply
-// non-delayed rewrites, match the ordered rules, drop a syntactically invalid or
-// vanished profile to Chrome default (§10), then apply delayed rewrites. It reads
-// Chrome's Local State to vet the profile (same as Route) but has no other side
-// effects, so the editor preview can call it directly.
-func Resolve(cfg *config.Config, url string) Resolution {
+// non-delayed rewrites, match the ordered rules (against url and source), drop a
+// syntactically invalid or vanished profile to Chrome default (§10), then apply
+// delayed rewrites. source is the originating app image name (§5.4), resolved
+// once by the caller and injected so Resolve/Match stay pure; "" means
+// undeterminable. It reads Chrome's Local State to vet the profile (same as
+// Route) but has no other side effects, so the editor preview can call it
+// directly with a simulated source.
+func Resolve(cfg *config.Config, url, source string) Resolution {
 	// Pre-rewrites (§15) run before profile selection, so both the match and the
 	// launched URL see the rewritten string. A nil/empty rewrite list is a no-op,
 	// so configs without rewrites resolve exactly as before.
 	original := url
 	url, preApplied := ApplyRewrites(cfg.Rewrites, url, false)
 
-	res := Match(cfg, url)
+	res := Match(cfg, url, source)
 	profileDir := res.ProfileDirectory
 
 	// A profile must be syntactically valid and still exist; otherwise fall back
@@ -77,6 +86,7 @@ func Resolve(cfg *config.Config, url string) Resolution {
 		// Chrome default.
 		Incognito: res.Rule != nil && res.Rule.Incognito,
 		Applied:   append(preApplied, postApplied...),
+		Source:    source,
 	}
 }
 
@@ -96,7 +106,13 @@ func Route(url string) error {
 		log.Printf("config error, routing to Chrome default: %v", err)
 	}
 
-	r := Resolve(cfg, url)
+	// Resolve the originating app once per click (§5.4) and inject it, keeping
+	// Resolve/Match pure. The lookup walks the live process tree; it is
+	// best-effort and fails open — an undeterminable source ("") simply leaves any
+	// source predicate unsatisfied, never blocking the click.
+	src := resolveSource()
+
+	r := Resolve(cfg, url, src)
 	// rule is the matched rule id, or "default" on no match. It is carried to the
 	// single per-click line emitted after launch (§9: one line per click). The
 	// match decision is not logged on its own line — the final routed/launch line
@@ -120,14 +136,14 @@ func Route(url string) error {
 
 	args := launchArgs(r.ProfileDirectory, r.Incognito, r.URL)
 	if err := startProcess(chromePath, args...); err != nil {
-		log.Printf("launch failed url=%q final=%q rule=%q profile=%q incognito=%v rewrites=%v chrome=%q: %v", r.Original, r.URL, rule, r.ProfileDirectory, r.Incognito, r.Applied, chromePath, err)
+		log.Printf("launch failed url=%q final=%q rule=%q profile=%q incognito=%v source=%q rewrites=%v chrome=%q: %v", r.Original, r.URL, rule, r.ProfileDirectory, r.Incognito, r.Source, r.Applied, chromePath, err)
 		notifyError("Guise", "Failed to launch Chrome:\n"+err.Error())
 		return fmt.Errorf("launching chrome: %w", err)
 	}
 	// One consolidated line per click (§9). final= and rewrites= are included so a
 	// URL the rewrites changed is debuggable; for the common no-rewrite case final
 	// equals url and rewrites is empty.
-	log.Printf("routed url=%q final=%q rule=%q profile=%q incognito=%v rewrites=%v chrome=%q", r.Original, r.URL, rule, r.ProfileDirectory, r.Incognito, r.Applied, chromePath)
+	log.Printf("routed url=%q final=%q rule=%q profile=%q incognito=%v source=%q rewrites=%v chrome=%q", r.Original, r.URL, rule, r.ProfileDirectory, r.Incognito, r.Source, r.Applied, chromePath)
 	return nil
 }
 
