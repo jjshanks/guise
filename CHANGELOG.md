@@ -10,6 +10,18 @@ below.
 
 ## [Unreleased]
 
+### Added
+- Profile-by-account matching: a rule can now bind to a Chrome profile by its
+  **Google Workspace hosted domain or account email** via an optional
+  `profile_match` field (`{ "email": "joe@acme.com" }` or
+  `{ "hosted_domain": "acme.com" }`) instead of the brittle on-disk
+  `profile_directory`. The account is resolved to the current directory at route
+  time from Chrome's Local State, so the binding survives Chrome renumbering
+  profiles across machines. It overrides `profile_directory` when both are set,
+  and an account that resolves to no current profile falls back to Chrome's
+  default exactly like a vanished directory (fail-closed). Surfaced in the rule
+  editor as a "Match by account" dropdown. Documented as SPEC §4.1/§4.2 (#22).
+
 ## [0.7.0] - 2026-06-21
 
 ### Added

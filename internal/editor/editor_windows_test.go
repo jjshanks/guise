@@ -28,6 +28,59 @@ func TestProfileOptionDirsUnion(t *testing.T) {
 	}
 }
 
+// TestAccountOptionsUnion proves the by-account dropdown (#22) lists signed-in
+// discovered profiles and seeds any account a rule already binds to that
+// discovery did not return, so an existing profile_match round-trips.
+func TestAccountOptionsUnion(t *testing.T) {
+	profiles := []chrome.Profile{
+		{Directory: "Default", Email: "joe@acme.com", Name: "Work", HostedDomain: "acme.com"},
+		{Directory: "Profile 1"}, // signed out → no account option.
+	}
+	rules := []config.Rule{
+		{ProfileMatch: &config.ProfileMatch{Email: "joe@acme.com"}},  // already discovered → not duplicated.
+		{ProfileMatch: &config.ProfileMatch{Email: "gone@acme.com"}}, // removed account → still offered.
+		{ProfileDirectory: "Profile 1"},                              // directory-bound → contributes nothing.
+	}
+	got := accountOptions(profiles, rules)
+	if len(got) != 2 {
+		t.Fatalf("got %d account options, want 2: %+v", len(got), got)
+	}
+	if got[0].match.Email != "joe@acme.com" {
+		t.Errorf("option 0 = %+v, want joe@acme.com", got[0].match)
+	}
+	if got[1].match.Email != "gone@acme.com" {
+		t.Errorf("option 1 = %+v, want the removed account seeded from the rule", got[1].match)
+	}
+}
+
+// TestAccountComboRoundTrip proves a rule's ProfileMatch maps to a stable combo
+// index and back, and that an absent match selects the sentinel at index 0.
+func TestAccountComboRoundTrip(t *testing.T) {
+	w := &window{accountOpts: accountOptions(
+		[]chrome.Profile{{Directory: "Default", Email: "joe@acme.com"}},
+		[]config.Rule{{ProfileMatch: &config.ProfileMatch{HostedDomain: "corp.example"}}},
+	)}
+
+	idx := w.accountComboIndex(&config.ProfileMatch{Email: "JOE@ACME.COM"}) // case-insensitive.
+	if idx == 0 {
+		t.Fatal("known account mapped to the sentinel; an edit would drop the binding")
+	}
+	if m := w.matchForAccountIndex(idx); m.IsZero() || m.Email != "joe@acme.com" {
+		t.Errorf("round trip: got %+v, want joe@acme.com", m)
+	}
+	// A rule-seeded hosted-domain match also round-trips.
+	if i := w.accountComboIndex(&config.ProfileMatch{HostedDomain: "corp.example"}); i == 0 {
+		t.Error("seeded hosted-domain match should have a stable index")
+	}
+	// No match → sentinel; sentinel → nil.
+	if i := w.accountComboIndex(nil); i != 0 {
+		t.Errorf("absent match should map to sentinel index 0, got %d", i)
+	}
+	if m := w.matchForAccountIndex(0); m != nil {
+		t.Errorf("sentinel index 0 should map to nil match, got %+v", m)
+	}
+}
+
 // TestProfileComboRoundTripMissingProfile guards the data-loss regression: a
 // rule whose profile is absent from Local State must keep a stable combo index
 // so editing another field on its row does not reset the profile to "Chrome

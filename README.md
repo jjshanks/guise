@@ -187,6 +187,14 @@ Rules live in `%APPDATA%\Guise\config.json` and are edited from the tray
 - Matching is **case-sensitive**; prefix `(?i)` for case-insensitive.
 - `profile_directory` is the on-disk folder name (`Default`, `Profile 1`, …),
   not the friendly Chrome name. The editor's dropdown bridges the two.
+- `profile_match` (optional) binds the rule to a profile by **Google account**
+  instead of by directory — an account `email` (`"joe@acme.com"`) or a Workspace
+  `hosted_domain` (`"acme.com"`). It's resolved to the current directory at route
+  time, so it survives Chrome renumbering profiles across machines. When set it
+  overrides `profile_directory`; an account that matches no current profile falls
+  back to Chrome's default, just like a vanished directory. The editor's "Match
+  by account" dropdown sets it. Example:
+  `{ "id": "r3", "enabled": true, "pattern": ".", "profile_match": { "email": "joe@acme.com" } }`
 - `source` (optional) matches the **app that produced the click** — a
   case-insensitive substring of the process image name, e.g. `slack` matches
   `Slack.exe`. A rule with both `pattern` and `source` needs **both** to match;

@@ -112,6 +112,46 @@ func TestSaveLoadRoundTripRewrites(t *testing.T) {
 	}
 }
 
+func TestSaveLoadRoundTripProfileMatch(t *testing.T) {
+	// The per-rule account matcher (§4.1, #22) round-trips, and a rule without one
+	// omits the key so existing configs stay byte-identical.
+	t.Setenv("APPDATA", t.TempDir())
+	want := &Config{
+		Version: SchemaVersion,
+		Rules: []Rule{
+			{ID: "a", Enabled: true, Pattern: `acme\.com`, ProfileMatch: &ProfileMatch{Email: "joe@acme.com"}, Comment: "by email"},
+			{ID: "b", Enabled: true, Pattern: `corp`, ProfileMatch: &ProfileMatch{HostedDomain: "acme.com"}},
+			{ID: "c", Enabled: true, Pattern: `github\.com`, ProfileDirectory: "Profile 2"},
+		},
+	}
+	if err := Save(want); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	data, err := os.ReadFile(Path())
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	// Exactly two "profile_match" keys on disk — rules a and b; rule c omits it.
+	if n := strings.Count(string(data), `"profile_match"`); n != 2 {
+		t.Errorf("expected 2 profile_match keys on disk, got %d:\n%s", n, data)
+	}
+
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if m := got.Rules[0].ProfileMatch; m.IsZero() || m.Email != "joe@acme.com" {
+		t.Errorf("email match did not round-trip: %+v", m)
+	}
+	if m := got.Rules[1].ProfileMatch; m.IsZero() || m.HostedDomain != "acme.com" {
+		t.Errorf("hosted-domain match did not round-trip: %+v", m)
+	}
+	if !got.Rules[2].ProfileMatch.IsZero() {
+		t.Errorf("directory-bound rule should load with no profile_match, got %+v", got.Rules[2].ProfileMatch)
+	}
+}
+
 func TestLoadNormalizesNilRewrites(t *testing.T) {
 	// A config written before rewrites existed has no "rewrites" key; Load must
 	// surface an empty (non-nil) slice so the editor and router never see nil.

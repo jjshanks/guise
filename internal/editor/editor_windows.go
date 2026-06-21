@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/lxn/walk"
 	d "github.com/lxn/walk/declarative"
@@ -40,6 +41,12 @@ func (m *rulesModel) Value(row, col int) interface{} {
 	case 1:
 		return r.Pattern
 	case 2:
+		// A rule bound by account (#22) shows the account, not the directory it
+		// currently resolves to, since that is what the user chose and what
+		// survives renumbering.
+		if !r.ProfileMatch.IsZero() {
+			return accountColumnLabel(*r.ProfileMatch)
+		}
 		return m.nameFor(r.ProfileDirectory)
 	case 3:
 		return r.Comment
@@ -90,14 +97,21 @@ type window struct {
 	// stable index and round-trips through an edit instead of being silently
 	// reset to "Chrome default".
 	profileOptions []string
-	model          *rulesModel
-	rwModel        *rewritesModel
+	// accountOpts are the by-account profile choices the "match by account"
+	// dropdown offers (#22), in combo order (a sentinel sits at index 0, ahead of
+	// these). It is the union of every signed-in discovered profile and any
+	// account a rule already binds to that discovery did not return, so a rule
+	// matched by an account no longer present still round-trips through an edit.
+	accountOpts []accountOpt
+	model       *rulesModel
+	rwModel     *rewritesModel
 
 	tv           *walk.TableView
 	enabledCB    *walk.CheckBox
 	patternEd    *walk.LineEdit
 	patternErr   *walk.Label
 	profileCB    *walk.ComboBox
+	accountCB    *walk.ComboBox
 	incognitoCB  *walk.CheckBox
 	sourceEd     *walk.LineEdit
 	commentEd    *walk.LineEdit
@@ -137,6 +151,7 @@ func Show() error {
 	w.cfg = cfg
 	w.profiles, _ = chrome.Profiles() // Best effort; dropdown may be empty.
 	w.profileOptions = profileOptionDirs(w.profiles, w.cfg.Rules)
+	w.accountOpts = accountOptions(w.profiles, w.cfg.Rules)
 	w.model = &rulesModel{rules: &w.cfg.Rules, nameFor: w.friendlyName}
 	w.rwModel = &rewritesModel{rewrites: &w.cfg.Rewrites}
 
@@ -165,6 +180,76 @@ func profileOptionDirs(profiles []chrome.Profile, rules []config.Rule) []string 
 		add(rules[i].ProfileDirectory)
 	}
 	return dirs
+}
+
+// accountOpt is one entry in the "match by account" dropdown (#22): the
+// profile_match value it stores plus the friendly label shown. Combo index 0 is
+// a sentinel ("use the profile above") that no accountOpt represents.
+type accountOpt struct {
+	match config.ProfileMatch
+	label string
+}
+
+// accountOptions lists the by-account binding choices for the dropdown: every
+// signed-in discovered profile (an email), followed by any account a rule
+// already binds to that discovery did not return (account removed, or Local
+// State unreadable) so an existing profile_match round-trips through an edit
+// instead of silently reverting to the directory binding.
+func accountOptions(profiles []chrome.Profile, rules []config.Rule) []accountOpt {
+	var opts []accountOpt
+	seen := make(map[string]bool)
+	key := func(m config.ProfileMatch) string {
+		return strings.ToLower(m.Email) + "\x00" + strings.ToLower(m.HostedDomain)
+	}
+	add := func(m config.ProfileMatch, label string) {
+		if m.IsZero() || seen[key(m)] {
+			return
+		}
+		seen[key(m)] = true
+		opts = append(opts, accountOpt{match: m, label: label})
+	}
+	for _, p := range profiles {
+		if p.Email == "" {
+			continue
+		}
+		add(config.ProfileMatch{Email: p.Email}, accountLabel(p))
+	}
+	for i := range rules {
+		if m := rules[i].ProfileMatch; !m.IsZero() {
+			add(*m, accountMatchLabel(*m))
+		}
+	}
+	return opts
+}
+
+// accountLabel renders a discovered profile as "email — Friendly Name [domain]".
+func accountLabel(p chrome.Profile) string {
+	label := p.Email
+	if p.Name != "" {
+		label += " — " + p.Name
+	}
+	if p.HostedDomain != "" {
+		label += " [" + p.HostedDomain + "]"
+	}
+	return label
+}
+
+// accountMatchLabel renders a rule-seeded match whose account discovery did not
+// return, flagging that it maps to no current profile.
+func accountMatchLabel(m config.ProfileMatch) string {
+	if m.Email != "" {
+		return m.Email + " (no current profile)"
+	}
+	return "@" + m.HostedDomain + " (no current profile)"
+}
+
+// accountColumnLabel is the compact form shown in the rules table's Profile
+// column when a rule binds by account.
+func accountColumnLabel(m config.ProfileMatch) string {
+	if m.Email != "" {
+		return m.Email
+	}
+	return "@" + m.HostedDomain
 }
 
 func (w *window) build() error {
@@ -238,6 +323,8 @@ func (w *window) build() error {
 									d.Label{AssignTo: &w.patternErr, Text: ""},
 									d.Label{Text: "Profile:"},
 									d.ComboBox{AssignTo: &w.profileCB, OnCurrentIndexChanged: w.writeBack},
+									d.Label{Text: "Match by account:"},
+									d.ComboBox{AssignTo: &w.accountCB, ToolTipText: "Bind to a Chrome profile by Google account (email/Workspace domain) instead of the on-disk directory — survives Chrome renumbering profiles. Overrides the Profile above when set.", OnCurrentIndexChanged: w.writeBack},
 									d.CheckBox{AssignTo: &w.incognitoCB, Text: "Open in incognito", OnCheckedChanged: w.writeBack, ColumnSpan: 2},
 									d.Label{Text: "Source app (optional):"},
 									d.LineEdit{AssignTo: &w.sourceEd, ToolTipText: "Match clicks from this app — case-insensitive substring of the process image name, e.g. slack matches Slack.exe. Blank = any source.", OnTextChanged: w.writeBack},
@@ -340,6 +427,7 @@ func (w *window) build() error {
 	}
 
 	w.fillProfileCombo()
+	w.fillAccountCombo()
 	w.populate()        // Clears the rule detail pane (nothing selected yet).
 	w.populateRewrite() // Same for the rewrite detail pane.
 
@@ -414,6 +502,43 @@ func (w *window) comboIndexForProfile(dir string) int {
 	return 0
 }
 
+// fillAccountCombo loads the "match by account" dropdown (#22). The sentinel at
+// index 0 defers to the Profile directory above; the rest line up index-for-index
+// with w.accountOpts.
+func (w *window) fillAccountCombo() {
+	items := make([]string, 0, len(w.accountOpts)+1)
+	items = append(items, "(use the profile above)")
+	for _, o := range w.accountOpts {
+		items = append(items, o.label)
+	}
+	w.accountCB.SetModel(items)
+}
+
+// accountComboIndex maps a rule's ProfileMatch back to a combo index. A
+// zero/absent match is the sentinel at index 0; otherwise the matching option
+// (seeded from every rule's match, so it is always present) wins.
+func (w *window) accountComboIndex(m *config.ProfileMatch) int {
+	if m.IsZero() {
+		return 0
+	}
+	for i, o := range w.accountOpts {
+		if strings.EqualFold(o.match.Email, m.Email) && strings.EqualFold(o.match.HostedDomain, m.HostedDomain) {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+// matchForAccountIndex maps a combo index to the ProfileMatch it stores, or nil
+// for the sentinel at index 0 (bind by directory instead).
+func (w *window) matchForAccountIndex(i int) *config.ProfileMatch {
+	if i <= 0 || i-1 >= len(w.accountOpts) {
+		return nil
+	}
+	m := w.accountOpts[i-1].match
+	return &m
+}
+
 func (w *window) onSelect() {
 	w.current = w.tv.CurrentIndex()
 	w.populate()
@@ -429,6 +554,7 @@ func (w *window) populate() {
 		w.patternEd.SetText("")
 		w.commentEd.SetText("")
 		w.profileCB.SetCurrentIndex(0)
+		w.accountCB.SetCurrentIndex(0)
 		w.incognitoCB.SetChecked(false)
 		w.sourceEd.SetText("")
 		w.patternErr.SetText("")
@@ -439,6 +565,7 @@ func (w *window) populate() {
 	w.patternEd.SetText(r.Pattern)
 	w.commentEd.SetText(r.Comment)
 	w.profileCB.SetCurrentIndex(w.comboIndexForProfile(r.ProfileDirectory))
+	w.accountCB.SetCurrentIndex(w.accountComboIndex(r.ProfileMatch))
 	w.incognitoCB.SetChecked(r.Incognito)
 	w.sourceEd.SetText(r.Source)
 	w.validatePattern(r.Pattern)
@@ -455,6 +582,9 @@ func (w *window) writeBack() {
 	r.Pattern = w.patternEd.Text()
 	r.Comment = w.commentEd.Text()
 	r.ProfileDirectory = w.profileForComboIndex(w.profileCB.CurrentIndex())
+	// Account binding (#22) overrides the directory when chosen; the sentinel
+	// (nil) leaves the rule on its ProfileDirectory.
+	r.ProfileMatch = w.matchForAccountIndex(w.accountCB.CurrentIndex())
 	r.Incognito = w.incognitoCB.Checked()
 	r.Source = w.sourceEd.Text()
 	w.model.PublishRowChanged(w.current)

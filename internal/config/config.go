@@ -19,6 +19,15 @@ type Rule struct {
 	Pattern          string `json:"pattern"`             // Go RE2 pattern, matched unanchored.
 	ProfileDirectory string `json:"profile_directory"`   // On-disk dir name, e.g. "Profile 3".
 	Incognito        bool   `json:"incognito,omitempty"` // Open the matched URL in an incognito window. Omitempty + default-false keeps existing configs byte-identical.
+	// ProfileMatch optionally selects the profile by Google account (#22, §4.1)
+	// instead of by the brittle on-disk ProfileDirectory — a Workspace hosted
+	// domain or account email, resolved to the current directory at route time so
+	// the binding survives Chrome renumbering profiles across machines. When set
+	// (non-nil with a non-empty field) it takes precedence over ProfileDirectory;
+	// an account that resolves to no current profile fails closed to Chrome
+	// default (§10), exactly like a vanished ProfileDirectory. A pointer with
+	// omitempty keeps configs without account matching byte-identical.
+	ProfileMatch *ProfileMatch `json:"profile_match,omitempty"`
 	// Source optionally constrains the rule to clicks that originated from a
 	// particular application (§5.4, #16): a case-insensitive substring matched
 	// against the originating process's image name (e.g. "slack" matches
@@ -28,6 +37,24 @@ type Rule struct {
 	// without a source predicate byte-identical.
 	Source  string `json:"source,omitempty"`
 	Comment string `json:"comment"`
+}
+
+// ProfileMatch selects a Chrome profile by Google account rather than by the
+// on-disk directory name (§4.1, #22). At most one field is consulted, Email
+// before HostedDomain, and both are matched case-insensitively against Chrome's
+// Local State (§4.2). Empty fields are omitted from JSON so a partially-filled
+// match stays compact.
+type ProfileMatch struct {
+	Email        string `json:"email,omitempty"`         // Exact account email, e.g. "joe@acme.com".
+	HostedDomain string `json:"hosted_domain,omitempty"` // Workspace hosted domain, e.g. "acme.com".
+}
+
+// IsZero reports whether the match selects nothing — a nil pointer or all fields
+// empty — in which case the rule falls back to its ProfileDirectory. Defined on
+// the pointer so callers can test a possibly-absent ProfileMatch without a nil
+// check.
+func (p *ProfileMatch) IsZero() bool {
+	return p == nil || (p.Email == "" && p.HostedDomain == "")
 }
 
 // Rewrite is a literal find-and-replace transform applied to the URL before it
