@@ -67,10 +67,15 @@ Two design invariants that explain the whole system — do not break them withou
 
 **Routing pipeline (`internal/router`):** ROUTE and the editor's "Test URL" preview share one
 function, `Resolve` — so the preview can never drift from a real click. It runs, in order:
-pre-rewrites → rule match → profile validate/fallback → delayed rewrites, then launches with the
-profile flag and (if the matched rule opts in) `--incognito`.
+pre-rewrites → rule match → account resolve → profile validate/fallback → delayed rewrites, then
+launches with the profile flag and (if the matched rule opts in) `--incognito`.
 - **Matching:** Go RE2 regex (`regexp` package — no backreferences), **unanchored** against the
   full URL, **case-sensitive** by default. `Start()` not `Run()` so ROUTE exits without waiting.
+- **Profile-by-account (§4.2, #22):** a rule may bind to a profile by Google account
+  (`profile_match: {email|hosted_domain}`) instead of the brittle `profile_directory`.
+  `chrome.ResolveAccount` maps the account → current directory from Local State at route time; it
+  **takes precedence** over `profile_directory` and **fails closed** (an unresolvable account, or
+  unreadable Local State, drops to Chrome default just like a vanished directory).
 - **Source app (§5.4):** a rule may also match the originating app (`source`, a case-insensitive
   substring of the process image name). `Route` resolves it once via `internal/source` (process-tree
   walk, skipping brokers) and injects it into `Match` — best-effort, **fail-open**: an

@@ -60,12 +60,29 @@ func Resolve(cfg *config.Config, url, source string) Resolution {
 
 	res := Match(cfg, url, source)
 	profileDir := res.ProfileDirectory
+	dropped := false
+
+	// Account binding (#22): when the matched rule selects its profile by Google
+	// account (email or Workspace hosted domain) rather than by directory, resolve
+	// it to the current on-disk directory against Local State before the validity
+	// check below. An account that resolves to no current profile (removed, or
+	// Local State unreadable) fails closed to Chrome default (§10), exactly like a
+	// vanished profile_directory.
+	if res.Rule != nil && !res.Rule.ProfileMatch.IsZero() {
+		if dir, ok := chrome.ResolveAccount(res.Rule.ProfileMatch.Email, res.Rule.ProfileMatch.HostedDomain); ok {
+			profileDir = dir
+		} else {
+			profileDir = ""
+			dropped = true
+		}
+	}
 
 	// A profile must be syntactically valid and still exist; otherwise fall back
 	// to Chrome's default (§10). The syntax check guards against a tampered config
 	// injecting odd values into chrome.exe's command line even when Local State is
-	// unreadable and ProfileExists cannot vet the name.
-	dropped := false
+	// unreadable and ProfileExists cannot vet the name. A directory resolved from
+	// an account above is already known-good, but re-vetting it costs nothing and
+	// keeps one fallback path.
 	if profileDir != "" && (!chrome.ValidProfileDir(profileDir) || !chrome.ProfileExists(profileDir)) {
 		profileDir = ""
 		dropped = true
@@ -123,8 +140,8 @@ func Route(url string) error {
 	}
 	if r.ProfileDropped {
 		// r.Rule is non-nil whenever a profile was dropped (a profile can only come
-		// from a matched rule), so logging its configured directory is safe.
-		log.Printf("profile %q invalid or missing -> Chrome default", r.Rule.ProfileDirectory)
+		// from a matched rule), so describing its configured target is safe.
+		log.Printf("profile %s invalid or missing -> Chrome default", profileTarget(r.Rule))
 	}
 
 	chromePath, err := chrome.ResolvePath(cfg.ChromePath)
@@ -145,6 +162,18 @@ func Route(url string) error {
 	// equals url and rewrites is empty.
 	log.Printf("routed url=%q final=%q rule=%q profile=%q incognito=%v source=%q rewrites=%v chrome=%q", r.Original, r.URL, rule, r.ProfileDirectory, r.Incognito, r.Source, r.Applied, chromePath)
 	return nil
+}
+
+// profileTarget describes a rule's intended profile for the drop log (§9): the
+// account when it binds by profile_match (#22), otherwise the quoted directory.
+func profileTarget(r *config.Rule) string {
+	if !r.ProfileMatch.IsZero() {
+		if r.ProfileMatch.Email != "" {
+			return "account " + r.ProfileMatch.Email
+		}
+		return "domain " + r.ProfileMatch.HostedDomain
+	}
+	return fmt.Sprintf("%q", r.ProfileDirectory)
 }
 
 // launchArgs builds the chrome.exe argument list. An empty profileDir omits

@@ -178,6 +178,85 @@ func TestResolveIncognitoSurvivesDroppedProfile(t *testing.T) {
 	}
 }
 
+func TestRouteAccountMatchResolvesToProfile(t *testing.T) {
+	// A rule bound by account email (#22) resolves to the current profile
+	// directory at route time and launches with that flag.
+	h := newRouteHarness(t)
+	h.writeConfig(t, `[{"id":"1","enabled":true,"pattern":"acme\\.com","profile_match":{"email":"joe@acme.com"}}]`)
+	h.writeLocalState(t, `{"profile":{"info_cache":{"Default":{"name":"P"},"Profile 1":{"name":"Work","user_name":"joe@acme.com","hosted_domain":"acme.com"}}}}`)
+
+	if err := Route("https://acme.com/x"); err != nil {
+		t.Fatalf("Route: %v", err)
+	}
+	want := []string{"--profile-directory=Profile 1", "https://acme.com/x"}
+	if !reflect.DeepEqual(h.gotArgs, want) {
+		t.Errorf("args = %v, want %v", h.gotArgs, want)
+	}
+}
+
+func TestRouteAccountMatchByHostedDomain(t *testing.T) {
+	// Binding by Workspace hosted domain resolves to the profile with that domain.
+	h := newRouteHarness(t)
+	h.writeConfig(t, `[{"id":"1","enabled":true,"pattern":".","profile_match":{"hosted_domain":"acme.com"}}]`)
+	h.writeLocalState(t, `{"profile":{"info_cache":{"Profile 3":{"name":"Work","user_name":"joe@acme.com","hosted_domain":"acme.com"}}}}`)
+
+	if err := Route("https://example.com/x"); err != nil {
+		t.Fatalf("Route: %v", err)
+	}
+	want := []string{"--profile-directory=Profile 3", "https://example.com/x"}
+	if !reflect.DeepEqual(h.gotArgs, want) {
+		t.Errorf("args = %v, want %v", h.gotArgs, want)
+	}
+}
+
+func TestRouteAccountMatchOverridesDirectory(t *testing.T) {
+	// When a rule sets both, the account binding wins over profile_directory (#22).
+	h := newRouteHarness(t)
+	h.writeConfig(t, `[{"id":"1","enabled":true,"pattern":".","profile_directory":"Profile 9","profile_match":{"email":"joe@acme.com"}}]`)
+	h.writeLocalState(t, `{"profile":{"info_cache":{"Profile 1":{"name":"Work","user_name":"joe@acme.com"}}}}`)
+
+	if err := Route("https://x.test/"); err != nil {
+		t.Fatalf("Route: %v", err)
+	}
+	want := []string{"--profile-directory=Profile 1", "https://x.test/"}
+	if !reflect.DeepEqual(h.gotArgs, want) {
+		t.Errorf("args = %v, want %v (account should override directory)", h.gotArgs, want)
+	}
+}
+
+func TestRouteUnresolvableAccountFallsBackToDefault(t *testing.T) {
+	// §10/#22: an account that resolves to no current profile must fail closed to
+	// Chrome default, just like a vanished profile_directory.
+	h := newRouteHarness(t)
+	h.writeConfig(t, `[{"id":"1","enabled":true,"pattern":".","profile_match":{"email":"gone@acme.com"}}]`)
+	h.writeLocalState(t, `{"profile":{"info_cache":{"Profile 1":{"name":"Work","user_name":"joe@acme.com"}}}}`)
+
+	if err := Route("https://x.test/"); err != nil {
+		t.Fatalf("Route: %v", err)
+	}
+	if want := []string{"https://x.test/"}; !reflect.DeepEqual(h.gotArgs, want) {
+		t.Errorf("args = %v, want %v (unresolvable account should drop the flag)", h.gotArgs, want)
+	}
+}
+
+func TestResolveUnresolvableAccountMarksDropped(t *testing.T) {
+	// The editor preview (Resolve) must mark the matched-but-unresolvable account
+	// as dropped, so it previews as Chrome default exactly as a real click routes.
+	h := newRouteHarness(t)
+	h.writeLocalState(t, `{"profile":{"info_cache":{"Profile 1":{"name":"Work","user_name":"joe@acme.com"}}}}`)
+
+	cfg := &config.Config{Version: 1, Rules: []config.Rule{
+		{ID: "r", Enabled: true, Pattern: `x\.com`, ProfileMatch: &config.ProfileMatch{Email: "gone@acme.com"}},
+	}}
+	got := Resolve(cfg, "https://x.com/foo", "")
+	if got.Rule == nil || got.Rule.ID != "r" {
+		t.Fatalf("expected rule r to match, got %+v", got.Rule)
+	}
+	if !got.ProfileDropped || got.ProfileDirectory != "" {
+		t.Errorf("unresolvable account should drop to Chrome default: dropped=%v dir=%q", got.ProfileDropped, got.ProfileDirectory)
+	}
+}
+
 func TestRouteNoMatchOmitsFlag(t *testing.T) {
 	h := newRouteHarness(t)
 	h.writeConfig(t, `[{"id":"1","enabled":true,"pattern":"github\\.com","profile_directory":"Profile 1"}]`)
