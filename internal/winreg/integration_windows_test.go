@@ -161,6 +161,46 @@ func TestRepointProgIDsRoundTrip(t *testing.T) {
 	}
 }
 
+// TestReadUCProgIDRoundTrip verifies readUCProgID against both UserChoice
+// layouts (#29) on a throwaway key (never the real UCPD-protected UserChoice
+// keys): the legacy direct "ProgId" value, and the newer layout where the ProgID
+// is nested as a "ProgId" value inside a "ProgId" subkey. The direct value wins
+// when present; the nested value is the fallback. Gated behind GUISE_REGISTRY_IT=1
+// like the other round-trips.
+func TestReadUCProgIDRoundTrip(t *testing.T) {
+	if os.Getenv("GUISE_REGISTRY_IT") != "1" {
+		t.Skip("set GUISE_REGISTRY_IT=1 to run the registry integration test")
+	}
+	base := `SOFTWARE\GuiseSelfTest\UCProgID`
+	nestedKey := base + `\` + progIDValue
+	t.Cleanup(func() {
+		registry.DeleteKey(registry.CURRENT_USER, nestedKey)
+		registry.DeleteKey(registry.CURRENT_USER, base)
+		registry.DeleteKey(registry.CURRENT_USER, `SOFTWARE\GuiseSelfTest`)
+	})
+
+	// Absent key/value reads as "" without error.
+	if got, err := readUCProgID(base); got != "" || err != nil {
+		t.Fatalf("readUCProgID(absent) = %q, %v; want \"\", nil", got, err)
+	}
+
+	// Nested-only layout (newer Windows 11): no direct value, ProgId subkey holds it.
+	if err := setString(nestedKey, progIDValue, "GuiseHTML"); err != nil {
+		t.Fatalf("seed nested: %v", err)
+	}
+	if got, err := readUCProgID(base); got != "GuiseHTML" || err != nil {
+		t.Fatalf("readUCProgID(nested) = %q, %v; want GuiseHTML, nil", got, err)
+	}
+
+	// Direct value present (legacy layout) takes precedence over the nested subkey.
+	if err := setString(base, progIDValue, "ChromeHTML"); err != nil {
+		t.Fatalf("seed direct: %v", err)
+	}
+	if got, err := readUCProgID(base); got != "ChromeHTML" || err != nil {
+		t.Fatalf("readUCProgID(direct) = %q, %v; want ChromeHTML, nil", got, err)
+	}
+}
+
 // TestHandlerExeRoundTrip verifies the resolver behind IsDefault (#9) against
 // real HKCU classes: a seeded ProgID's shell\open\command parses back to its
 // exe, and samePath then matches the current exe against it. An absent ProgID

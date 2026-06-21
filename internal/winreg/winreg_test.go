@@ -75,7 +75,10 @@ func TestDecideDefault(t *testing.T) {
 		{"guise + stale latest (bug, pre-repair)", "GuiseHTML", "URLRouterHTML-stale", false},
 		{"guise + repaired alias latest (post #8 repair)", "GuiseHTML", "URLRouterHTML-repaired", true},
 		{"chrome chosen", "ChromeHTML", "ChromeHTML", false},
-		{"userchoice empty, latest guise", "", "GuiseHTML", false},
+		// UserChoiceLatest is authoritative when present: a valid Latest=guise is
+		// default even when UserChoice is empty or stale-foreign (24H2, #29).
+		{"userchoice empty, latest guise", "", "GuiseHTML", true},
+		{"stale chrome userchoice, latest guise (24H2 #29)", "ChromeHTML", "GuiseHTML", true},
 		{"guise + unresolvable latest", "GuiseHTML", "GhostHTML", false},
 		{"repaired alias in both slots", "URLRouterHTML-repaired", "URLRouterHTML-repaired", true},
 	}
@@ -116,6 +119,10 @@ func TestDecideHealth(t *testing.T) {
 		{"guise, no latest", "GuiseHTML", "", HealthDefault},
 		{"guise in both", "GuiseHTML", "GuiseHTML", HealthDefault},
 		{"repaired alias counts as default", "GuiseHTML", "URLRouterHTML-repaired", HealthDefault},
+		// UserChoiceLatest is authoritative: a stale-foreign UserChoice neither
+		// makes guise non-default nor blocks repair when Latest is guise (#29).
+		{"stale chrome uc, latest guise (24H2 #29)", "ChromeHTML", "GuiseHTML", HealthDefault},
+		{"chrome uc, stale guise-owned latest (#29 repairable)", "ChromeHTML", "GuiseHTML-stale", HealthRepairable},
 		{"stale latest, guise-owned", "GuiseHTML", "GuiseHTML-stale", HealthRepairable},
 		{"stale legacy alias in both", "URLRouterHTML-stale", "URLRouterHTML-stale", HealthRepairable},
 		{"reverted to edge", "MSEdgeHTM", "MSEdgeHTM", HealthNotDefault},
