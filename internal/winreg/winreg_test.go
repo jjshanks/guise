@@ -88,6 +88,50 @@ func TestDecideDefault(t *testing.T) {
 	}
 }
 
+// TestDecideHealth drives the pure watchdog verdict (§3.5, #14) without the
+// registry, reusing the decideDefault resolver convention: a ProgID resolves to
+// the exe its HKCU class command would launch, or "" when it has no HKCU class
+// (a system handler like ChromeHTML/MSEdgeHTM in HKLM).
+func TestDecideHealth(t *testing.T) {
+	const exe = `C:\Apps\Guise\guise.exe`
+	resolve := func(pid string) string {
+		switch pid {
+		case "GuiseHTML", "URLRouterHTML-repaired":
+			return exe // launches the current exe
+		case "GuiseHTML-stale", "URLRouterHTML-stale":
+			return `C:\Old\guise\guise.exe` // guise-owned class, but stale path
+		case "ChromeHTML", "MSEdgeHTM":
+			return "" // system-managed: no HKCU class command to repoint
+		default:
+			return ""
+		}
+	}
+	tests := []struct {
+		name   string
+		uc     string
+		latest string
+		want   Health
+	}{
+		{"both empty", "", "", HealthNotDefault},
+		{"guise, no latest", "GuiseHTML", "", HealthDefault},
+		{"guise in both", "GuiseHTML", "GuiseHTML", HealthDefault},
+		{"repaired alias counts as default", "GuiseHTML", "URLRouterHTML-repaired", HealthDefault},
+		{"stale latest, guise-owned", "GuiseHTML", "GuiseHTML-stale", HealthRepairable},
+		{"stale legacy alias in both", "URLRouterHTML-stale", "URLRouterHTML-stale", HealthRepairable},
+		{"reverted to edge", "MSEdgeHTM", "MSEdgeHTM", HealthNotDefault},
+		{"guise uc, edge latest wins", "GuiseHTML", "MSEdgeHTM", HealthNotDefault},
+		{"unknown progid (no class)", "GhostHTML", "", HealthNotDefault},
+		{"stale uc, edge latest", "GuiseHTML-stale", "MSEdgeHTM", HealthNotDefault},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := decideHealth(exe, tt.uc, tt.latest, resolve); got != tt.want {
+				t.Errorf("decideHealth(uc=%q, latest=%q) = %v, want %v", tt.uc, tt.latest, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSamePath(t *testing.T) {
 	tests := []struct {
 		name string

@@ -68,6 +68,39 @@ func postGUI(fn func()) {
 	}
 }
 
+// recoverDefault attempts to restore guise as the default https handler (§3.5),
+// the lever behind both the watchdog prompt and a click on the "Default browser:
+// No" menu item. When the active ProgID is a guise-owned class left pointing at a
+// stale exe it repoints that class (HKCU, no elevation) and re-verifies; when the
+// chosen handler is foreign (e.g. Edge) — which guise cannot repoint — the only
+// recourse is the Default Apps settings deep link (§3.3). It fails soft: every
+// error is logged and never propagates. Returns true only when guise is the
+// working default afterward (so the caller can confirm success to the user).
+func recoverDefault(exe string) bool {
+	h, err := winreg.HealthCheck(exe)
+	if err != nil {
+		log.Printf("watchdog: health check: %v", err)
+		return false
+	}
+	if h == winreg.HealthDefault {
+		return true // Already healthy — nothing to recover.
+	}
+	if h == winreg.HealthRepairable {
+		if repaired := winreg.Repair(exe); len(repaired) > 0 {
+			log.Printf("watchdog: repaired stale ProgIDs %v", repaired)
+		}
+		if h2, err := winreg.HealthCheck(exe); err == nil && h2 == winreg.HealthDefault {
+			return true
+		}
+		log.Printf("watchdog: repair did not restore default; opening Default Apps settings")
+	}
+	// Foreign handler, or a repair that didn't stick: hand off to the user.
+	if err := winutil.ShellOpen("ms-settings:defaultapps"); err != nil {
+		log.Printf("watchdog: open default apps settings: %v", err)
+	}
+	return false
+}
+
 func onReady(exe string) {
 	// Remove the <exe>.old left by a previous self-update (§14). On the first
 	// startup right after an update this may fail (the old image is still
@@ -258,29 +291,64 @@ func onReady(exe string) {
 		}
 	}
 
-	// Live default-browser indicator (§6.1): poll so it reflects changes the
-	// user makes in Settings without restarting the tray.
-	refreshDefault := func() {
-		switch isDef, err := winreg.IsDefault(exe); {
+	// Live default-browser indicator (§6.1) and reversion watchdog (§3.5) share
+	// one poll. The indicator reflects changes the user makes in Settings without
+	// restarting the tray; the watchdog catches Windows *silently* reverting the
+	// default away from guise (a Patch-Tuesday reboot repointing UserChoiceLatest)
+	// and offers one-click recovery, so the user learns before links stop working.
+	// firstHealthy / wasHealthy live in this goroutine only, so the transition
+	// detection needs no lock. A reversion fires only on the healthy→broken edge,
+	// so a persistently-broken state never re-nags every tick.
+	firstHealthy := true
+	wasHealthy := false
+	checkHealth := func() {
+		h, err := winreg.HealthCheck(exe)
+		switch {
 		case err != nil:
+			// An unreadable state is no clean signal: leave the baseline alone so a
+			// transient read error isn't mistaken for a reversion.
 			mDefault.SetTitle("Default browser: unknown")
 			mDefault.Uncheck()
-		case isDef:
+			return
+		case h == winreg.HealthDefault:
 			mDefault.SetTitle("Default browser: Yes")
 			mDefault.Check()
 		default:
 			mDefault.SetTitle("Default browser: No — click to fix")
 			mDefault.Uncheck()
 		}
+		healthy := h == winreg.HealthDefault
+		if firstHealthy {
+			// Don't nag at startup about a pre-existing broken state — startup
+			// already runs RepairStaleDefaults, and the indicator shows it. Only
+			// runtime transitions raise the toast.
+			firstHealthy = false
+			wasHealthy = healthy
+			return
+		}
+		if wasHealthy && !healthy {
+			log.Printf("watchdog: Windows reverted the default browser (health=%d); prompting", h)
+			if notify.Confirm("Guise", "Windows has changed your default browser away from Guise, so links may stop opening in your Chrome profiles.\n\nLet Guise restore it now?") {
+				if recoverDefault(exe) {
+					notify.Info("Guise", "Guise is set as your default browser again.")
+				}
+			}
+			// Re-read so a successful in-prompt repair updates the baseline now,
+			// and a still-broken state doesn't re-fire on the very next tick.
+			if h2, err := winreg.HealthCheck(exe); err == nil {
+				healthy = h2 == winreg.HealthDefault
+			}
+		}
+		wasHealthy = healthy
 	}
-	refreshDefault()
+	checkHealth()
 	go func() {
 		t := time.NewTicker(4 * time.Second)
 		defer t.Stop()
 		for {
 			select {
 			case <-t.C:
-				refreshDefault()
+				checkHealth()
 			case <-done:
 				return
 			}
@@ -311,11 +379,7 @@ func onReady(exe string) {
 		for {
 			select {
 			case <-mDefault.ClickedCh:
-				if isDef, _ := winreg.IsDefault(exe); !isDef {
-					if err := winutil.ShellOpen("ms-settings:defaultapps"); err != nil {
-						log.Printf("open default apps settings: %v", err)
-					}
-				}
+				recoverDefault(exe)
 			case <-mEdit.ClickedCh:
 				postGUI(func() {
 					if err := editor.Show(); err != nil {
