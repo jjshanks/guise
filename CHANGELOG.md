@@ -11,6 +11,14 @@ below.
 ## [Unreleased]
 
 ### Added
+- One-command setup: `guise --setup` collapses onboarding into a single,
+  idempotent command — it registers guise as a browser, enables start-at-login,
+  launches the tray, and opens the Windows Default Apps page, then exits. The one
+  step Windows 11 forbids automating (choosing the default browser) is surfaced
+  as a final instruction. Runs entirely under HKCU with no elevation/UAC. The
+  tray is now single-instance (a per-session named mutex), so re-running setup
+  never starts a second tray. This is the new primary install path. Documented as
+  SPEC §16.
 - Profile-by-account matching: a rule can now bind to a Chrome profile by its
   **Google Workspace hosted domain or account email** via an optional
   `profile_match` field (`{ "email": "joe@acme.com" }` or

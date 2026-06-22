@@ -605,3 +605,39 @@ The transform is a pure function in `internal/router` (`ApplyRewrites`), shared 
 ### 15.4 Editor
 
 The rule editor (§6.2) gains a **Rewrites** tab beside **Rules**: a reorderable table (On / Find / Replace / When / Comment) with the same Add/Delete/Move controls, and a detail pane with Enabled, Find, Replace, an "Apply after profile match (delayed)" checkbox, and Comment. The shared Test URL field at the top reflects rewrites and rules together.
+
+---
+
+## 16. One-command setup (`--setup`)
+
+`guise --setup` collapses onboarding into a single command. Without it a new user must copy the exe, run `--register`, run `--tray`, then open Windows Settings to pick the default browser. `--setup` automates everything that *can* be automated and hands the user directly to the one step Windows 11 forbids automating. It is the install path winget, the README, and launch posts point at, so it must be reliable and **idempotent**.
+
+It is a SETUP-family mode dispatched in `main_windows.go`, alongside `--register`/`--unregister`. Like them it runs entirely under **HKCU — no elevation, no UAC** (the hard invariant, §2, §3). It is **fire-and-exit**: it performs its steps, hands off to the long-lived tray, and exits 0 rather than staying resident.
+
+### 16.1 The steps
+
+Performed in order, each idempotent and **fail-soft** (a failed step is logged and surfaced, but the rest still run — never a panic, never a partial-crash abort):
+
+| # | Step | Reuses |
+|---|---|---|
+| 1 | Register the HKCU default-browser entries (and repair stale ProgIDs, as `--register` does) | `winreg.Register` + `winreg.RepairStaleDefaults` (§3.1, §3.4) |
+| 2 | Enable start-at-login | `winreg.SetAutostart` (§7) |
+| 3 | Spawn the tray detached, unless one is already running | `exec` + `tray.IsRunning` (§16.2) |
+| 4 | Open the Default Apps deep link | `winutil.ShellOpen("ms-settings:defaultapps")` — the same URI the tray's fix-default item uses (§3.3) |
+| 5 | Notify the user of the one remaining manual step | `notify.Info` (§10) |
+
+Step 1 calls the **existing** register routine — it never duplicates registry writes. Step 5 names only the manual step Windows reserves for the user (e.g. *"Guise is registered and running. Last step: in the Settings window that just opened, pick Guise and choose Set default."*); when guise is already the default it says so and names nothing. Detecting whether the user actually sets the default is the tray's existing job (its live §3.5 status item) — `--setup` does not block or poll.
+
+The orchestration lives in **`internal/setup`** as a pure function whose side effects (register, autostart, tray-spawn, deep-link, notify) are injected as a `Deps` struct. This keeps step order, idempotency, and fail-soft behavior unit-testable cross-platform with fakes; `main_windows.go` wires the real Win32 implementations. Non-Windows builds never reach it (the whole binary is the `main_other.go` stub, like every other mode).
+
+### 16.2 Single-instance tray (idempotency)
+
+`--setup` must result in **exactly one** running tray, even on a re-run. The tray (§6) is therefore single-instance: `Run` acquires a per-session named mutex (`Local\GuiseTraySingleton`) and exits immediately if another instance already holds it. `--setup` checks `tray.IsRunning` first to avoid a redundant spawn, but the mutex guard is the real backstop — a tray that starts between the check and the spawn simply self-exits, so the race is harmless. The mutex is `Local\`-scoped to the login session, matching guise's per-user model.
+
+### 16.3 Deep-link fallback
+
+Step 4 fails soft through a chain: the `ms-settings:defaultapps` deep link, falling back to reciting the manual click-path (`Settings → Apps → Default apps → Guise → Set default`) in step 5's message if the shell open fails. The user is never stranded without knowing where to go.
+
+### 16.4 Failure handling & logging
+
+Every step's outcome is logged to `guise.log` (§9) in the one-line-per-event style, so a failed setup is fully reconstructable from the log. Any single step failing is logged, surfaced to the user, and continues where it makes sense (a failed register still runs autostart + tray + deep-link, leaving the user as close to done as possible). `--setup` always exits 0 — it is best-effort onboarding, not a gate.

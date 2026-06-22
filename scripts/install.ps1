@@ -6,8 +6,10 @@
 .DESCRIPTION
     Fetches the latest released guise.exe from GitHub, verifies it against the
     release's published SHA-256 (guise.exe.sha256), installs it under
-    %LOCALAPPDATA%\Programs\Guise, registers it as an eligible browser
-    (guise.exe --register), and launches the tray (guise.exe --tray).
+    %LOCALAPPDATA%\Programs\Guise, then runs one-command setup (guise.exe
+    --setup): registers it as an eligible browser, enables start-at-login,
+    launches the tray, and opens the Windows Default Apps page so you can finish
+    by choosing guise as your default.
 
     Everything is written to HKEY_CURRENT_USER, so no admin rights are needed.
 
@@ -142,13 +144,15 @@ try {
     }
     Copy-Item $exePath $dest -Force
 
-    # --- Register + launch -----------------------------------------------------
-    Write-Step "Registering guise as a browser"
-    & $dest --register
-    if ($LASTEXITCODE -ne 0) { Die "guise.exe --register exited with code $LASTEXITCODE" }
-
-    Write-Step "Launching the tray"
-    Start-Process -FilePath $dest -ArgumentList "--tray"
+    # --- Set up ----------------------------------------------------------------
+    # One-command onboarding (SPEC §16): registers guise as a browser, enables
+    # start-at-login, launches the tray, and opens the Default Apps page. It is
+    # idempotent and fail-soft (always exits 0, surfacing any per-step problem in
+    # its own dialog), so there is no exit code to gate on. Launched detached
+    # because its final "set your default" prompt is modal — the script should not
+    # block the terminal on it.
+    Write-Step "Running guise setup (register, autostart, launch tray)"
+    Start-Process -FilePath $dest -ArgumentList "--setup"
 }
 finally {
     Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
@@ -159,11 +163,12 @@ $ver = if ($tag) { " $tag" } else { "" }
 Write-Host ""
 Write-Host "guise$ver installed to $InstallDir" -ForegroundColor Green
 Write-Host ""
-Write-Host "Two manual steps remain (Windows 11 forbids automating them):" -ForegroundColor Yellow
-Write-Host "  1. Set guise as your default browser:"
-Write-Host "       Settings -> Apps -> Default apps -> Guise -> Set default"
-Write-Host "     (the tray's 'Default browser: No - click to fix' item deep-links there)"
-Write-Host "  2. Toggle 'Start at login' in the tray menu to autostart guise."
+Write-Host "Setup registered guise, enabled start-at-login, and launched the tray." -ForegroundColor Green
+Write-Host ""
+Write-Host "One manual step remains (Windows 11 forbids automating it):" -ForegroundColor Yellow
+Write-Host "  Set guise as your default browser in the Settings window that just opened:"
+Write-Host "    Settings -> Apps -> Default apps -> Guise -> Set default"
+Write-Host "  (the tray's 'Default browser: No - click to fix' item also deep-links there)"
 Write-Host ""
 Write-Host "Edit routing rules from the tray ('Edit rules...'). See"
 Write-Host "  https://github.com/$Owner/$Repo for documentation."
