@@ -26,6 +26,7 @@ chrome.exe --profile-directory="Profile 3" https://github.com/foo
 | Invocation | Mode | Does |
 |---|---|---|
 | `guise.exe <url>` | ROUTE | match, launch Chrome, exit (this is what Windows runs per click) |
+| `guise.exe --setup` | SETUP | one-command onboarding: register + start-at-login + launch tray + open Default Apps, then exit |
 | `guise.exe --tray` | TRAY | tray icon + rule editor (autostart this at login) |
 | `guise.exe --register` | SETUP | write HKCU registry entries so the app is an eligible browser |
 | `guise.exe --unregister` | SETUP | remove those entries |
@@ -102,13 +103,26 @@ winget install jjshanks.guise
 
 This is a [portable](https://learn.microsoft.com/windows/package-manager/) install:
 it drops `guise.exe` and puts a `guise` command on your PATH, but it does **not**
-register guise as a browser. Finish setup once:
+register guise as a browser. Finish setup with one command:
+
+```powershell
+guise --setup
+```
+
+This registers guise as a browser, enables start-at-login, launches the tray,
+and opens the Default Apps settings page. It's idempotent, so re-running it is
+safe. **One manual step remains** — Windows 11 forbids silent default-browser
+changes, so in the Settings window that opens, pick **Guise** and choose **Set
+default**. (The tray's "Default browser: No — click to fix" item also deep-links
+there.)
+
+<details><summary>Prefer the individual steps?</summary>
 
 1. Run `guise --register` (or open the tray with `guise --tray` and let it register).
 2. Run `guise --tray` and toggle **Start at login** in the tray menu.
-3. Windows 11 forbids silent default-browser changes, so set the default
-   yourself: **Settings → Apps → Default apps → Guise → Set default**
-   (the tray's "Default browser: No — click to fix" item deep-links there).
+3. Set the default browser: **Settings → Apps → Default apps → Guise → Set default**.
+
+</details>
 
 winget-installed copies update through `winget upgrade jjshanks.guise` — the built-in
 updater detects the winget install and steps aside (see [SPEC §14](SPEC.md)).
@@ -120,9 +134,9 @@ irm https://raw.githubusercontent.com/jjshanks/guise/main/scripts/install.ps1 | 
 ```
 
 It downloads the latest `guise.exe`, **verifies it against the release's
-published SHA-256**, installs it to `%LOCALAPPDATA%\Programs\Guise\`, registers
-it as an eligible browser, and launches the tray. Overrides (set before the
-pipe, since `iex` can't take parameters):
+published SHA-256**, installs it to `%LOCALAPPDATA%\Programs\Guise\`, and runs
+`guise --setup` (register + start-at-login + launch tray + open Default Apps).
+Overrides (set before the pipe, since `iex` can't take parameters):
 
 ```powershell
 # Pin a version instead of latest:
@@ -131,12 +145,10 @@ $env:GUISE_VERSION='v1.2.3'; irm https://raw.githubusercontent.com/jjshanks/guis
 $env:GUISE_INSTALL_DIR='D:\Apps\Guise'; irm https://raw.githubusercontent.com/jjshanks/guise/main/scripts/install.ps1 | iex
 ```
 
-Two manual steps remain afterward (Windows 11 forbids automating them):
-
-1. Set the default browser: **Settings → Apps → Default apps → Guise → Set
-   default** (the tray's "Default browser: No — click to fix" item deep-links
-   there).
-2. Toggle **Start at login** in the tray menu to autostart guise.
+One manual step remains afterward (Windows 11 forbids automating it): set the
+default browser in the Settings window that opens — **Settings → Apps → Default
+apps → Guise → Set default** (the tray's "Default browser: No — click to fix"
+item also deep-links there).
 
 ### Manual install
 
@@ -144,9 +156,18 @@ If you'd rather not pipe a script, grab `guise.exe` from the
 [latest release](https://github.com/jjshanks/guise/releases/latest) and:
 
 1. Copy `guise.exe` to `%LOCALAPPDATA%\Programs\Guise\`.
+2. Run `guise.exe --setup` once — it registers guise, enables start-at-login,
+   launches the tray, and opens the Default Apps page.
+3. Set the default browser in the window that opens: **Settings → Apps →
+   Default apps → Guise → Set default**.
+
+<details><summary>Or run the steps individually</summary>
+
 2. Run `guise.exe --register` once.
 3. Run `guise.exe --tray` and toggle **Start at login** in the tray menu.
-4. Set the default browser as in step 1 above.
+4. Set the default browser as above.
+
+</details>
 
 The install-script and manual paths keep themselves current via the in-app
 updater (§14); only the winget path defers updates to `winget upgrade`.

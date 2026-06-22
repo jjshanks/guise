@@ -41,8 +41,16 @@ var (
 )
 
 // Run starts the tray and blocks until Quit. exe is the absolute path to this
-// binary, used for the autostart Run value (§7).
+// binary, used for the autostart Run value (§7). It is single-instance: if a
+// tray is already running this returns immediately without drawing a second
+// icon, which is what lets --setup spawn the tray unconditionally (§16).
 func Run(exe string) {
+	release, ok := acquireSingleInstance()
+	if !ok {
+		log.Printf("tray: another instance is already running; exiting")
+		return
+	}
+	defer release()
 	go guiThread()
 	systray.Run(func() { onReady(exe) }, func() {})
 }

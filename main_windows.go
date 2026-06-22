@@ -5,6 +5,8 @@
 //
 //	guise.exe <url>         ROUTE mode  — match, launch Chrome, exit.
 //	guise.exe --tray        TRAY mode   — tray icon + rule editor.
+//	guise.exe --setup       SETUP mode  — register + autostart + launch tray +
+//	                                      deep-link to Default Apps, then exit (§16).
 //	guise.exe --register    SETUP mode  — write HKCU registry entries.
 //	guise.exe --unregister  SETUP mode  — remove them.
 //	guise.exe --version     report the embedded build version and exit.
@@ -20,14 +22,17 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"strings"
 
 	"guise/internal/applog"
 	"guise/internal/notify"
 	"guise/internal/router"
+	"guise/internal/setup"
 	"guise/internal/tray"
 	"guise/internal/version"
 	"guise/internal/winreg"
+	"guise/internal/winutil"
 )
 
 // main keeps no logic of its own beyond translating run's exit code: calling
@@ -56,6 +61,12 @@ func run() int {
 	case args[0] == "--unregister":
 		// Unregister only deletes keys, so it needs no exe path.
 		return unregister()
+	case args[0] == "--setup":
+		exe, ok := selfPath()
+		if !ok {
+			return 1
+		}
+		return setupGuise(exe)
 	case args[0] == "--register":
 		exe, ok := selfPath()
 		if !ok {
@@ -93,6 +104,24 @@ func selfPath() (string, bool) {
 		return "", false
 	}
 	return exe, true
+}
+
+// setupGuise runs one-command onboarding (§16): it wires the real HKCU,
+// tray-spawn, and shell-open boundaries into the pure orchestration in
+// internal/setup, which performs the steps in order, fail-soft. The tray is
+// spawned detached with Start (not Run) — the same pattern the updater uses to
+// relaunch — so it outlives this short-lived --setup process.
+func setupGuise(exe string) int {
+	return setup.Run(exe, setup.Deps{
+		Register:            winreg.Register,
+		RepairStaleDefaults: winreg.RepairStaleDefaults,
+		SetAutostart:        winreg.SetAutostart,
+		IsDefault:           winreg.IsDefault,
+		TrayRunning:         tray.IsRunning,
+		SpawnTray:           func(exe string) error { return exec.Command(exe, "--tray").Start() },
+		OpenSettings:        winutil.ShellOpen,
+		Notify:              notify.Info,
+	})
 }
 
 func register(exe string) int {
