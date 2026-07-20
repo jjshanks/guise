@@ -21,7 +21,7 @@ jobs:
         with:
           fetch-depth: 0 # full history + tags so `git describe` resolves the tag
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
